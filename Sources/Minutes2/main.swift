@@ -901,7 +901,8 @@ final class TimerSession: NSObject, NSWindowDelegate, NSPopoverDelegate {
     let frameName: String
     weak var app: AppDelegate?
     var engine = TimerEngine(minutes: UserDefaults.standard.object(forKey: "minutes") as? Int ?? 25,
-                             repeats: UserDefaults.standard.bool(forKey: "repeats"))
+                             repeats: UserDefaults.standard.bool(forKey: "repeats"),
+                             speedMultiplier: UserDefaults.standard.object(forKey: "speedMultiplier") as? Int ?? 1)
     let audio = AudioController()
     let window: TimerWindow
     let dial: DialView
@@ -978,6 +979,15 @@ final class TimerSession: NSObject, NSWindowDelegate, NSPopoverDelegate {
         dial.closeMusicSelection()
         engine.select(minutes)
         UserDefaults.standard.set(engine.selectedMinutes, forKey: "minutes")
+        app?.sessionChanged(self)
+    }
+    func setSpeed(_ multiplier: Int) {
+        guard !closed, app?.isPresentingAlarm == false, engine.phase != .alarm,
+              TimerEngine.speedOptions.contains(multiplier) else { return }
+        let now = Date()
+        engine.setSpeed(multiplier, at: now)
+        UserDefaults.standard.set(engine.speedMultiplier, forKey: "speedMultiplier")
+        if engine.tick(at: now) { app?.enqueueAlarm(self) }
         app?.sessionChanged(self)
     }
     func toggleTimer() {
@@ -1155,6 +1165,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             item.tag = percent; opacityMenu.addItem(item)
         }
         opacityItem.submenu = opacityMenu; view.addItem(opacityItem)
+        let speedItem = NSMenuItem(title: "倍速模式", action: nil, keyEquivalent: "")
+        let speedMenu = NSMenu(title: "倍速模式")
+        for multiplier in TimerEngine.speedOptions {
+            let item = menuItem(multiplier == 1 ? "正常速度（1 倍）" : "\(multiplier) 倍速", #selector(changeSpeed(_:)))
+            item.tag = multiplier; speedMenu.addItem(item)
+        }
+        speedItem.submenu = speedMenu; view.addItem(speedItem)
         add("视图", view)
         let windows = NSMenu(title: "窗口")
         windows.addItem(menuItem("居中显示", #selector(centerWindow)))
@@ -1170,6 +1187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         case #selector(closeTimer): return active != nil
         case #selector(toggleTimer), #selector(showSounds): return active != nil && active?.engine.phase != .alarm && !isPresentingAlarm
         case #selector(preset(_:)): return (active?.engine.phase == .setting || active?.engine.phase == .paused) && !isPresentingAlarm
+        case #selector(changeSpeed(_:)): return active != nil && active?.engine.phase != .alarm && !isPresentingAlarm
         case #selector(changeOpacity(_:)), #selector(changeSize(_:)), #selector(toggleRepeats), #selector(resetTimer), #selector(centerWindow): return active != nil && !isPresentingAlarm
         case #selector(previewAlarm): return active?.engine.phase == .setting && !isPresentingAlarm
         default: return true
@@ -1191,7 +1209,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         view?.items.first(where: { $0.title == "透明度" })?.submenu?.items.forEach {
             $0.state = $0.tag == active?.opacityPercent ? .on : .off
         }
+        view?.items.first(where: { $0.title == "倍速模式" })?.submenu?.items.forEach {
+            $0.state = $0.tag == active?.engine.speedMultiplier ? .on : .off
+        }
         updateStatus()
+    }
+    @objc private func changeSpeed(_ sender: NSMenuItem) {
+        guard validateMenuItem(sender) else { return }
+        active?.setSpeed(sender.tag)
     }
     @objc private func changeRest(_ sender: NSMenuItem) {
         guard RestCountdown.minuteOptions.contains(sender.tag) else { return }

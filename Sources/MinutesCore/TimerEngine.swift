@@ -44,12 +44,21 @@ public struct TimerEngine {
     public private(set) var phase: Phase = .setting
     public private(set) var selectedMinutes: Int
     public var repeats: Bool
+    public static let speedOptions = [1, 2, 4, 8, 16]
+    public private(set) var speedMultiplier: Int
     public private(set) var deadline: Date?
     private var pausedRemaining: TimeInterval = 0
 
-    public init(minutes: Int = 25, repeats: Bool = false) {
+    public init(minutes: Int = 25, repeats: Bool = false, speedMultiplier: Int = 1) {
         selectedMinutes = min(60, max(1, minutes))
         self.repeats = repeats
+        self.speedMultiplier = Self.speedOptions.contains(speedMultiplier) ? speedMultiplier : 1
+    }
+    public mutating func setSpeed(_ multiplier: Int, at now: Date) {
+        guard Self.speedOptions.contains(multiplier), phase != .alarm else { return }
+        let remainingTime = remaining(at: now)
+        speedMultiplier = multiplier
+        if phase == .running { deadline = now.addingTimeInterval(remainingTime / Double(multiplier)) }
     }
     public mutating func select(_ minutes: Int) {
         guard phase == .setting || phase == .paused else { return }
@@ -59,13 +68,13 @@ public struct TimerEngine {
     public func remaining(at now: Date) -> TimeInterval {
         switch phase {
         case .setting: return Double(selectedMinutes * 60)
-        case .running: return max(0, deadline!.timeIntervalSince(now))
+        case .running: return max(0, deadline!.timeIntervalSince(now) * Double(speedMultiplier))
         case .paused: return pausedRemaining
         case .alarm: return 0
         }
     }
     public func endTime(at now: Date) -> Date {
-        phase == .running ? deadline! : now.addingTimeInterval(remaining(at: now))
+        phase == .running ? deadline! : now.addingTimeInterval(remaining(at: now) / Double(speedMultiplier))
     }
     public func displayedMinutes(at now: Date) -> Int {
         Int(ceil(remaining(at: now) / 60))
@@ -83,14 +92,14 @@ public struct TimerEngine {
     public mutating func toggle(at now: Date) {
         switch phase {
         case .setting:
-            deadline = now.addingTimeInterval(Double(selectedMinutes * 60))
+            deadline = now.addingTimeInterval(Double(selectedMinutes * 60) / Double(speedMultiplier))
             phase = .running
         case .running:
             pausedRemaining = remaining(at: now)
             deadline = nil
             phase = pausedRemaining > 0 ? .paused : .alarm
         case .paused:
-            deadline = now.addingTimeInterval(pausedRemaining)
+            deadline = now.addingTimeInterval(pausedRemaining / Double(speedMultiplier))
             phase = .running
         case .alarm: break
         }
