@@ -1,0 +1,49 @@
+// !$*UTF8*$!
+{
+ archiveVersion = 1;
+ classes = {};
+ objectVersion = 56;
+ objects = {
+        000000000000000000000060 = { isa = PBXFileReference; lastKnownFileType = audio.wav; path = "Resources/BubblePop.wav"; sourceTree = "<group>"; };
+        000000000000000000000061 = { isa = PBXBuildFile; fileRef = 000000000000000000000060; };
+        000000000000000000000058 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/Minutes2/AboutWindow.swift"; sourceTree = "<group>"; };
+        000000000000000000000059 = { isa = PBXBuildFile; fileRef = 000000000000000000000058; };
+        000000000000000000000056 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/Minutes2/MinutesLogo.swift"; sourceTree = "<group>"; };
+        000000000000000000000057 = { isa = PBXBuildFile; fileRef = 000000000000000000000056; };
+        000000000000000000000054 = { isa = PBXFileReference; lastKnownFileType = folder; path = music; sourceTree = "<group>"; };
+        000000000000000000000055 = { isa = PBXBuildFile; fileRef = 000000000000000000000054; };
+		000000000000000000000052 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/MinutesCore/TimerAlarms.swift"; sourceTree = "<group>"; };
+		000000000000000000000053 = { isa = PBXBuildFile; fileRef = 000000000000000000000052; };
+		000000000000000000000050 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/Minutes2/CountdownDigits.swift"; sourceTree = "<group>"; };
+		000000000000000000000051 = { isa = PBXBuildFile; fileRef = 000000000000000000000050; };
+		00000000000000000000000A = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/Minutes2/main.swift"; sourceTree = "<group>"; };
+		00000000000000000000000B = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/MinutesCore/TimerEngine.swift"; sourceTree = "<group>"; };
+		00000000000000000000000C = { isa = PBXFileReference; lastKnownFileType = audio.wav; path = "Resources/Melody.wav"; sourceTree = "<group>"; };
+		00000000000000000000000D = { isa = PBXFileReference; lastKnownFileType = audio.wav; path = "Resources/Chimes.wav"; sourceTree = "<group>"; };
+		00000000000000000000000E = { isa = PBXFileReference; lastKnownFileType = audio.wav; path = "Resources/Gentle.wav"; sourceTree = "<group>"; };
+		00000000000000000000000F = { isa = PBXFileReference; lastKnownFileType = image.icns; path = "Resources/AppIcon.icns"; sourceTree = "<group>"; };
+		000000000000000000000010 = { isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Resources/Info.plist"; sourceTree = "<group>"; };
+		000000000000000000000011 = { isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "README.md"; sourceTree = "<group>"; };
+		00000000000000000000001E = { isa = PBXBuildFile; fileRef = 00000000000000000000000A; };
+		00000000000000000000001F = { isa = PBXBuildFile; fileRef = 00000000000000000000000B; };
+		000000000000000000000020 = { isa = PBXBuildFile; fileRef = 00000000000000000000000C; };
+		000000000000000000000021 = { isa = PBXBuildFile; fileRef = 00000000000000000000000D; };
+		000000000000000000000022 = { isa = PBXBuildFile; fileRef = 00000000000000000000000E; };
+		000000000000000000000023 = { isa = PBXBuildFile; fileRef = 00000000000000000000000F; };
+		000000000000000000000002 = { isa = PBXGroup; children = (000000000000000000000060,000000000000000000000058,000000000000000000000056,000000000000000000000054,00000000000000000000000A,000000000000000000000050,00000000000000000000000B,000000000000000000000052,00000000000000000000000C,00000000000000000000000D,00000000000000000000000E,00000000000000000000000F,000000000000000000000010,000000000000000000000011,000000000000000000000003); sourceTree = "<group>"; };
+		000000000000000000000003 = { isa = PBXGroup; children = (000000000000000000000004); name = Products; sourceTree = "<group>"; };
+		000000000000000000000004 = { isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Minutes2.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		000000000000000000000005 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (000000000000000000000059,000000000000000000000057,00000000000000000000001E,00000000000000000000001F,000000000000000000000051,000000000000000000000053); runOnlyForDeploymentPostprocessing = 0; };
+		000000000000000000000006 = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (000000000000000000000061,000000000000000000000055,000000000000000000000023); runOnlyForDeploymentPostprocessing = 0; };
+		000000000000000000000007 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		000000000000000000000008 = { isa = PBXNativeTarget; buildConfigurationList = 000000000000000000000016; buildPhases = (000000000000000000000005,000000000000000000000007,000000000000000000000006); buildRules = (); dependencies = (); name = Minutes2; productName = Minutes2; productReference = 000000000000000000000004; productType = "com.apple.product-type.application"; };
+		000000000000000000000001 = { isa = PBXProject; attributes = { LastUpgradeCheck = 1600; }; buildConfigurationList = 000000000000000000000015; compatibilityVersion = "Xcode 14.0"; developmentRegion = "zh-Hans"; hasScannedForEncodings = 0; knownRegions = ("zh-Hans",Base); mainGroup = 000000000000000000000002; productRefGroup = 000000000000000000000003; projectDirPath = ""; projectRoot = ""; targets = (000000000000000000000008); };
+		000000000000000000000015 = { isa = XCConfigurationList; buildConfigurations = (000000000000000000000017,000000000000000000000018); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		000000000000000000000016 = { isa = XCConfigurationList; buildConfigurations = (000000000000000000000019,00000000000000000000001A); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		000000000000000000000017 = { isa = XCBuildConfiguration; name = Debug; buildSettings = { CLANG_ENABLE_MODULES = YES; MACOSX_DEPLOYMENT_TARGET = 13.0; SDKROOT = macosx; SWIFT_VERSION = 5.0; }; };
+		000000000000000000000018 = { isa = XCBuildConfiguration; name = Release; buildSettings = { CLANG_ENABLE_MODULES = YES; MACOSX_DEPLOYMENT_TARGET = 13.0; SDKROOT = macosx; SWIFT_VERSION = 5.0; }; };
+		000000000000000000000019 = { isa = XCBuildConfiguration; name = Debug; buildSettings = { PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = local.minutes.swift; INFOPLIST_FILE = Resources/Info.plist; CODE_SIGN_IDENTITY = "-"; CODE_SIGN_STYLE = Manual; ENABLE_HARDENED_RUNTIME = YES; COMBINE_HIDPI_IMAGES = YES; SWIFT_VERSION = 5.0; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks"; }; };
+		00000000000000000000001A = { isa = XCBuildConfiguration; name = Release; buildSettings = { PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = local.minutes.swift; INFOPLIST_FILE = Resources/Info.plist; CODE_SIGN_IDENTITY = "-"; CODE_SIGN_STYLE = Manual; ENABLE_HARDENED_RUNTIME = YES; COMBINE_HIDPI_IMAGES = YES; SWIFT_VERSION = 5.0; SWIFT_OPTIMIZATION_LEVEL = "-O"; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks"; }; };
+ };
+ rootObject = 000000000000000000000001;
+}

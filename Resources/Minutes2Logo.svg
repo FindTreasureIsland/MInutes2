@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1000 1000">
+  <defs>
+    <linearGradient id="dial" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#ff2e5c"/><stop offset="1" stop-color="#ff6140"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dy="18" stdDeviation="18" flood-opacity=".28"/></filter>
+  </defs>
+  <circle cx="500" cy="500" r="482" fill="url(#dial)"/>
+  <circle cx="500" cy="500" r="469.1467" fill="none" stroke="white" stroke-width="25.7067"/>
+  <g transform="translate(500 500) scale(1.1463414634) translate(-500 -500)">
+  <g fill="none" stroke="white" stroke-width="62" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M315 345 L500 545" opacity=".65"/>
+    <path d="M685 345 V660" opacity=".55"/>
+    <path d="M500 545 L685 345"/>
+    <path d="M315 660 V345"/>
+  </g>
+  <path d="M760 590 C805 545 865 570 825 615 L760 682 H845" fill="none" stroke="white" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
