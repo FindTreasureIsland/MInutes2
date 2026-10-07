@@ -43,6 +43,18 @@ final class RepeatingTimerTests: XCTestCase {
         XCTAssertEqual(timer.remaining(at: dismissed), 180)
         XCTAssertEqual(timer.deadline, dismissed.addingTimeInterval(180))
     }
+    func testManualReminderDismissalRepeatsWithPreviousDurationAndSpeed() {
+        var timer = TimerEngine(minutes: 5, repeats: true, speedMultiplier: 8)
+        timer.toggle(at: start)
+        XCTAssertTrue(timer.tick(at: start.addingTimeInterval(37.5)))
+        let manuallyStopped = start.addingTimeInterval(45)
+        timer.dismissAlarm(at: manuallyStopped)
+        XCTAssertEqual(timer.phase, .running)
+        XCTAssertEqual(timer.selectedMinutes, 5)
+        XCTAssertEqual(timer.speedMultiplier, 8)
+        XCTAssertEqual(timer.remaining(at: manuallyStopped), 300)
+        XCTAssertEqual(timer.deadline, manuallyStopped.addingTimeInterval(37.5))
+    }
     func testNonRepeatingTimerReturnsToSettingAndManualResetDoesNotRepeat() {
         var timer = TimerEngine(minutes: 1)
         timer.toggle(at: start); timer.tick(at: start.addingTimeInterval(60))

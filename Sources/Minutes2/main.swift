@@ -15,6 +15,11 @@ final class TimerWindow: NSWindow {
     override var canBecomeMain: Bool { true }
 }
 
+private final class ReminderWindow: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
 final class AudioController {
     private var player: AVAudioPlayer?
     private var previewTimer: Timer?
@@ -730,6 +735,7 @@ final class BallsView: NSView {
     private var clock: Timer?
     private var bubbles: [(layer: CALayer, color: NSColor)] = []
     override var isOpaque: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     private let palette: [NSColor] = [
         NSColor(srgbRed: 1, green: 0.35, blue: 0.49, alpha: 1),
         NSColor(srgbRed: 0.20, green: 0.55, blue: 1, alpha: 1),
@@ -837,7 +843,7 @@ final class BallsView: NSView {
 }
 
 final class AlarmController {
-    private var windows: [NSWindow] = []
+    private var windows: [ReminderWindow] = []
     private var views: [BallsView] = []
     private var watcher: Timer?
     private var countdown: RestCountdown?
@@ -848,17 +854,18 @@ final class AlarmController {
     func show(restMinutes: Int) {
         countdown = RestCountdown(minutes: restMinutes, at: Date())
         for screen in NSScreen.screens {
-            let window = TimerWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
+            let window = ReminderWindow(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             window.level = .screenSaver
             window.backgroundColor = .clear; window.isOpaque = false; window.hasShadow = false
             window.ignoresMouseEvents = false
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+            window.hidesOnDeactivate = false
             window.isReleasedWhenClosed = false
             let view = BallsView(frame: NSRect(origin: .zero, size: screen.frame.size))
             view.doubleClicked = { [weak self] in self?.burstAndDismiss() }
             view.displayRest(seconds: countdown!.remainingSeconds(at: Date()))
             window.contentView = view; window.setFrame(screen.frame, display: true)
-            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
             windows.append(window); views.append(view)
         }
         watcher = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in self?.tick() }
@@ -936,13 +943,27 @@ final class TimerSession: NSObject, NSWindowDelegate, NSPopoverDelegate {
         window.acceptsMouseMovedEvents = true
         window.level = app.stayOnTop ? .floating : .normal
         window.collectionBehavior = [.fullScreenAuxiliary]
+        let restoredFrame = window.setFrameUsingName(frameName, force: true)
+        let restoredOrigin = window.frame.origin
         window.setFrameAutosaveName(frameName)
         window.setContentSize(Self.size(for: sizePercent))
-        if let origin {
-            let visible = window.screen?.visibleFrame ?? NSScreen.main!.visibleFrame
-            window.setFrameOrigin(NSPoint(x: min(max(visible.minX, origin.x + 36), visible.maxX - window.frame.width),
-                                          y: min(max(visible.minY, origin.y - 36), visible.maxY - window.frame.height)))
-        } else if UserDefaults.standard.string(forKey: "NSWindow Frame \(frameName)") == nil { window.center() }
+        let desiredOrigin: NSPoint?
+        if origin == nil, let saved = UserDefaults.standard.string(forKey: "lastClosedTimerOrigin") {
+            desiredOrigin = NSPointFromString(saved)
+        } else if restoredFrame {
+            desiredOrigin = restoredOrigin
+        } else if let origin {
+            desiredOrigin = NSPoint(x: origin.x + 36, y: origin.y - 36)
+        } else { desiredOrigin = nil }
+        if let desiredOrigin {
+            let proposed = NSRect(origin: desiredOrigin, size: window.frame.size)
+            let screen = NSScreen.screens.first { $0.visibleFrame.intersects(proposed) }
+                ?? window.screen ?? NSScreen.main
+            if let visible = screen?.visibleFrame {
+                window.setFrameOrigin(NSPoint(x: min(max(visible.minX, desiredOrigin.x), visible.maxX - window.frame.width),
+                                              y: min(max(visible.minY, desiredOrigin.y), visible.maxY - window.frame.height)))
+            } else { window.setFrameOrigin(desiredOrigin) }
+        } else { window.center() }
         dial.owner = self; window.contentView = dial; window.delegate = self
         dial.resize(to: Self.size(for: sizePercent))
         soundPopover.behavior = .transient; soundPopover.delegate = self
@@ -1030,7 +1051,14 @@ final class TimerSession: NSObject, NSWindowDelegate, NSPopoverDelegate {
     func popoverDidClose(_ notification: Notification) { if !showingAlarm { audio.stop() } }
     func windowDidBecomeKey(_ notification: Notification) { app?.activateSession(self) }
     func windowDidResignKey(_ notification: Notification) { dial.clearFocus() }
-    func windowWillClose(_ notification: Notification) { app?.removeSession(self) }
+    func savePosition() {
+        window.saveFrame(usingName: frameName)
+        UserDefaults.standard.set(NSStringFromPoint(window.frame.origin), forKey: "lastClosedTimerOrigin")
+    }
+    func windowWillClose(_ notification: Notification) {
+        savePosition()
+        app?.removeSession(self)
+    }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
@@ -1079,6 +1107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
     @objc private func newTimer() {
+        if sessions.isEmpty { nextNumber = 1 }
         let session = TimerSession(app: self, number: nextNumber, origin: active?.window.frame.origin)
         nextNumber += 1; sessions.append(session); lastActive = session
         session.showWindow(); sessionChanged(session)
@@ -1260,7 +1289,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             alarms.dismiss(); presentNextAlarm(); return
         }
         session.showingAlarm = true; session.soundPopover.close(); session.audio.stop(); session.window.orderOut(nil)
-        NSApp.activate(ignoringOtherApps: true); alarm.show(restMinutes: restMinutes); session.audio.play(loop: true)
+        alarm.show(restMinutes: restMinutes); session.audio.play(loop: true)
     }
     private func finishAlarm(completed: Bool) {
         guard let request = alarms.dismiss() else { return }
@@ -1268,8 +1297,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             session.audio.stop(); session.showingAlarm = false
             if !terminating {
                 if !request.preview {
-                    if completed { session.engine.dismissAlarm(at: Date()) }
-                    else { session.engine.reset() }
+                    session.engine.dismissAlarm(at: Date())
                 }
                 session.showWindow(); session.dial.refresh()
             }
@@ -1337,7 +1365,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     func applicationWillTerminate(_ notification: Notification) {
         terminating = true; ticker?.invalidate()
         if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
-        sessions.forEach { $0.soundPopover.close(); $0.audio.stop() }
+        sessions.forEach { $0.window.saveFrame(usingName: $0.frameName); $0.soundPopover.close(); $0.audio.stop() }
+        active?.savePosition()
         alarm.dismiss(); endActivity(); NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 }
