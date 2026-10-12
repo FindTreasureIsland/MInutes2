@@ -1316,7 +1316,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
     private func refresh() {
-        statusItem?.menu = timerMenu()
+        statusItem?.menu = timerMenu(includeRest: true)
         statusItem?.menu?.addItem(.separator())
         statusItem?.menu?.addItem(menuItem("显示番茄钟", #selector(showWindow), key: "0"))
         statusItem?.menu?.addItem(menuItem("退出 Minutes2", #selector(quit), key: "q"))
