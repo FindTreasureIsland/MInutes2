@@ -20,6 +20,11 @@ final class ReminderSceneTests: XCTestCase {
             }
         }
     }
+    func testEachSceneUsesItsOwnClosingSound() {
+        XCTAssertNil(ReminderAppearance(scene: "none").dismissalSound)
+        XCTAssertEqual(ReminderAppearance(scene: "bubbles").dismissalSound, "BubblePop")
+        XCTAssertEqual(ReminderAppearance(scene: "blackCat").dismissalSound, "CatMeow")
+    }
     func testHidingVisualsDoesNotShortenTheRestPeriod() {
         let start = Date(timeIntervalSince1970: 1000)
         let appearance = ReminderAppearance(scene: "none", showsCountdown: false)

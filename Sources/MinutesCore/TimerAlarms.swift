@@ -47,6 +47,13 @@ public struct ReminderAppearance {
     public let showsCountdown: Bool
     public var hasVisibleOverlay: Bool { scene != .none || showsCountdown }
     public var playsPopSound: Bool { scene == .bubbles }
+    public var dismissalSound: String? {
+        switch scene {
+        case .none: return nil
+        case .bubbles: return "BubblePop"
+        case .blackCat: return "CatMeow"
+        }
+    }
     public init(scene: String? = nil, showsCountdown: Bool = true) {
         self.scene = scene.flatMap(ReminderScene.init(rawValue:)) ?? .bubbles
         self.showsCountdown = showsCountdown

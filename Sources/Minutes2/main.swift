@@ -822,7 +822,9 @@ final class BallsView: NSView {
     private func addBall() {
         guard sceneAppearance.scene != .none, let layer else { return }
         let scale = min(bounds.width / 1470, bounds.height / 956)
-        let radius = CGFloat.random(in: 36...80) * max(0.5, scale)
+        let baseRadius = CGFloat.random(in: 36...80) * max(0.5, scale)
+        let radius = sceneAppearance.scene == .blackCat
+            ? baseRadius * CGFloat.random(in: 0.5...2) : baseRadius
         let ball = CALayer()
         ball.bounds = NSRect(x: 0, y: 0, width: 2 * radius, height: 2 * radius)
         ball.position = NSPoint(x: CGFloat.random(in: 0...bounds.width), y: CGFloat.random(in: 0...bounds.height))
@@ -831,7 +833,6 @@ final class BallsView: NSView {
             let aspect = CGFloat(catImage.height) / CGFloat(catImage.width)
             ball.bounds.size.height = ball.bounds.width * aspect
             ball.contents = catImage
-            ball.transform = CATransform3DMakeRotation(CGFloat.random(in: -.pi ... .pi), 0, 0, 1)
             bubbles.append((ball, .white))
         } else {
             let colorIndex = Int.random(in: 0..<bubbleImages.count)
@@ -901,15 +902,16 @@ final class AlarmController {
     func burstAndDismiss() {
         guard !bursting, !windows.isEmpty else { return }
         bursting = true; watcher?.invalidate(); watcher = nil
-        if appearance.playsPopSound, let url = Bundle.main.url(forResource: "BubblePop", withExtension: "wav") {
+        if let sound = appearance.dismissalSound, let url = Bundle.main.url(forResource: sound, withExtension: "wav") {
             burstSound = try? AVAudioPlayer(contentsOf: url)
+            burstSound?.numberOfLoops = 0
             burstSound?.volume = 0.4; burstSound?.play()
         }
         views.forEach { $0.burst() }
         let animationEndsAt = Date().addingTimeInterval(0.7)
         burstCompletion = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] _ in
             guard let self, Date() >= animationEndsAt, self.burstSound?.isPlaying != true else { return }
-            // finishAlarm stops the reminder music only after the water-pop sound finishes.
+            // Stop reminder music only after the scene-specific closing sound finishes.
             self.dismiss()
         }
     }
@@ -1161,6 +1163,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         toggle.keyEquivalentModifierMask = []; menu.addItem(toggle)
         let repeats = menuItem("重复计时", #selector(toggleRepeats)); repeats.state = active?.engine.repeats == true ? .on : .off
         menu.addItem(repeats)
+        if includeRest {
+            let countdownItem = menuItem("休息倒计时", #selector(toggleRestCountdown))
+            countdownItem.state = showsRestCountdown ? .on : .off; menu.addItem(countdownItem)
+        }
         if isPresentingAlarm { menu.addItem(menuItem("结束休息提醒", #selector(stopReminder))) }
         if includeRest {
             let sceneItem = NSMenuItem(title: "到时场景", action: nil, keyEquivalent: "")
@@ -1171,9 +1177,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 sceneMenu.addItem(choice)
             }
             sceneItem.submenu = sceneMenu; menu.addItem(sceneItem)
-            let countdownItem = menuItem("显示休息倒计时", #selector(toggleRestCountdown))
-            countdownItem.state = showsRestCountdown ? .on : .off; menu.addItem(countdownItem)
-
             let item = NSMenuItem(title: "休息时间", action: nil, keyEquivalent: "")
             let submenu = NSMenu(title: "休息时间")
             for minutes in RestCountdown.minuteOptions {

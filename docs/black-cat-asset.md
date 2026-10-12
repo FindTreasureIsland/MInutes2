@@ -2,8 +2,8 @@
 
 文件：`Resources/BlackCat.png`
 
-使用内置 imagegen 工具，根据用户提供的小黑猫附件生成透明背景素材。黄色背景、横线及背景投影已去除，保留黑色猫头、绿色眼睛、胡须和两只爪子；随机旋转由应用运行时完成。
+使用内置 imagegen 工具编辑用户提供的小黑猫素材，保留绿色眼睛、胡须、爪子及爪子后方横线，去除黄色背景。运行时不旋转，尺寸随机为原尺寸的 0.5～2 倍。
 
-最终生成提示词：
+最新编辑提示词：
 
-> Edit target: the attached illustration. Create a clean transparent PNG sprite of this exact cute black kitten peeking with two paws, oversized lime-green eyes, fluffy dark fur, asymmetric pointed ears, and fine whiskers. Preserve its appearance and illustration style. Remove ALL yellow background, the horizontal ledge/line and any cast shadow belonging to the background. Keep only the kitten head, whiskers and paws with clean alpha edges. Crop composition tightly around the kitten while retaining every whisker tip and paws, with a small transparent margin. Upright, no rotation; the application will rotate it. No new objects, text, frame or background. Genuine transparent background.
+> Edit target Image 1 is the existing transparent black kitten sprite. Supporting reference Image 2 shows the original kitten and the horizontal line its paws are resting on. Preserve Image 1 kitten exactly (fur, ears, green eyes, whiskers, paws, framing). Restore the thin horizontal ledge line from Image 2, straight and level, running across the full sprite width at the base of the head and behind the two paws. It has a dark charcoal outline with a narrow pale cream highlight. Keep the paws in front of the line. Preserve genuine alpha transparency everywhere outside the kitten and this thin line. No yellow background, no broad platform, no floor or background shadow, no rotation, no new objects. This is a small single change: add back the line while preserving the transparent sprite.
