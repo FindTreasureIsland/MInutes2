@@ -32,12 +32,13 @@ public struct TimerAlarms {
 
 /// Visuals and the optional clock are independent of the actual rest duration.
 public enum ReminderScene: String, CaseIterable {
-    case none, bubbles, blackCat
+    case none, bubbles, blackCat, blackCat2
     public var title: String {
         switch self {
         case .none: return "无"
         case .bubbles: return "气泡"
         case .blackCat: return "小黑猫"
+        case .blackCat2: return "小黑猫2"
         }
     }
 }
@@ -51,11 +52,41 @@ public struct ReminderAppearance {
         switch scene {
         case .none: return nil
         case .bubbles: return "BubblePop"
-        case .blackCat: return "CatMeow"
+        case .blackCat, .blackCat2: return "CatMeow"
         }
     }
     public init(scene: String? = nil, showsCountdown: Bool = true) {
         self.scene = scene.flatMap(ReminderScene.init(rawValue:)) ?? .bubbles
         self.showsCountdown = showsCountdown
+    }
+}
+
+public struct CatPeekPlacement {
+    public enum Edge: CaseIterable { case bottom, top, left, right }
+    public let position: CGPoint
+    public let hiddenPosition: CGPoint
+    public let angle: CGFloat
+    public init(screen: CGSize, sprite: CGSize, edge: Edge, location: Double) {
+        let t = CGFloat(min(1, max(0, location)))
+        let horizontal = edge == .bottom || edge == .top
+        let length = horizontal ? screen.width : screen.height
+        let margin = min(sprite.width / 2, length / 2)
+        let along = margin + t * max(0, length - 2 * margin)
+        let depth = sprite.height * 0.15
+        let outside = sprite.height * 0.5 + 2
+        switch edge {
+        case .bottom:
+            angle = 0; position = CGPoint(x: along, y: depth)
+            hiddenPosition = CGPoint(x: along, y: -outside)
+        case .top:
+            angle = .pi; position = CGPoint(x: along, y: screen.height - depth)
+            hiddenPosition = CGPoint(x: along, y: screen.height + outside)
+        case .left:
+            angle = -.pi / 2; position = CGPoint(x: depth, y: along)
+            hiddenPosition = CGPoint(x: -outside, y: along)
+        case .right:
+            angle = .pi / 2; position = CGPoint(x: screen.width - depth, y: along)
+            hiddenPosition = CGPoint(x: screen.width + outside, y: along)
+        }
     }
 }

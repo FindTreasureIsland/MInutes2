@@ -724,6 +724,13 @@ private enum BubbleAppearance {
 
 final class BallsView: NSView {
     var doubleClicked: (() -> Void)?
+    var catClicked: (() -> Void)?
+    private var peekingCats: [(layer: CALayer, hidden: CGPoint)] = []
+    private lazy var cat2Image: CGImage? = {
+        guard let url = Bundle.main.url(forResource: "BlackCat2", withExtension: "png"),
+              let image = NSImage(contentsOf: url) else { return nil }
+        return image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+    }()
     private let restDigits = RestDigitsView()
     private let sceneAppearance: ReminderAppearance
     private lazy var catImage: CGImage? = {
@@ -737,6 +744,7 @@ final class BallsView: NSView {
     }
     override func mouseDown(with event: NSEvent) {
         if event.clickCount >= 2 { doubleClicked?() }
+        else if sceneAppearance.scene == .blackCat2 { catClicked?() }
     }
     private var clock: Timer?
     private var bubbles: [(layer: CALayer, color: NSColor)] = []
@@ -759,13 +767,13 @@ final class BallsView: NSView {
         layer?.masksToBounds = true
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
-        setAccessibilityLabel("休息倒计时，彩球提醒，双击结束")
+        setAccessibilityLabel("休息提醒，\(sceneAppearance.scene.title)，双击结束")
         restDigits.frame = bounds; restDigits.autoresizingMask = [.width, .height]
         restDigits.isHidden = !sceneAppearance.showsCountdown
         addSubview(restDigits)
         if sceneAppearance.scene != .none {
             addBall()
-            clock = Timer(timeInterval: 0.45, repeats: true) { [weak self] _ in self?.addBall() }
+            clock = Timer(timeInterval: sceneAppearance.scene == .blackCat2 ? 1.2 : 0.45, repeats: true) { [weak self] _ in self?.addBall() }
             RunLoop.main.add(clock!, forMode: .common)
         }
     }
@@ -776,6 +784,18 @@ final class BallsView: NSView {
         guard let layer else { return }
         CATransaction.begin(); CATransaction.setDisableActions(true)
         restDigits.alphaValue = 0
+        if sceneAppearance.scene == .blackCat2 {
+            for cat in peekingCats {
+                let current = cat.layer.presentation()?.position ?? cat.layer.position
+                cat.layer.removeAllAnimations()
+                let retreat = CABasicAnimation(keyPath: "position")
+                retreat.fromValue = NSValue(point: current); retreat.toValue = NSValue(point: cat.hidden)
+                retreat.duration = 0.5; retreat.timingFunction = .init(name: .easeIn)
+                retreat.fillMode = .forwards; retreat.isRemovedOnCompletion = false
+                cat.layer.add(retreat, forKey: "retreat")
+            }
+            CATransaction.commit(); return
+        }
         for (index, bubble) in bubbles.enumerated() {
             let ball = bubble.layer
             ball.removeAllAnimations()
@@ -819,7 +839,32 @@ final class BallsView: NSView {
         }
         CATransaction.commit()
     }
+    private func addPeekingCat() {
+        guard let layer, let image = cat2Image else { return }
+        let scale = max(0.5, min(bounds.width / 1470, bounds.height / 956))
+        let width = CGFloat.random(in: 90...220) * scale
+        let size = CGSize(width: width, height: width * CGFloat(image.height) / CGFloat(image.width))
+        let placement = CatPeekPlacement(screen: bounds.size, sprite: size,
+                                         edge: CatPeekPlacement.Edge.allCases.randomElement()!,
+                                         location: Double.random(in: 0...1))
+        let cat = CALayer(); cat.bounds = CGRect(origin: .zero, size: size)
+        cat.contents = image; cat.contentsGravity = .resizeAspect
+        cat.contentsScale = window?.backingScaleFactor ?? 2
+        cat.position = placement.position
+        cat.transform = CATransform3DMakeRotation(placement.angle, 0, 0, 1)
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        layer.insertSublayer(cat, at: 0)
+        CATransaction.commit()
+        peekingCats.append((cat, placement.hiddenPosition))
+        let peek = CABasicAnimation(keyPath: "position")
+        peek.fromValue = NSValue(point: placement.hiddenPosition)
+        peek.toValue = NSValue(point: placement.position)
+        peek.duration = 0.85; peek.timingFunction = .init(name: .easeOut)
+        cat.add(peek, forKey: "peek")
+    }
     private func addBall() {
+        if sceneAppearance.scene == .blackCat2 { addPeekingCat(); return }
+
         guard sceneAppearance.scene != .none, let layer else { return }
         let scale = min(bounds.width / 1470, bounds.height / 956)
         let baseRadius = CGFloat.random(in: 36...80) * max(0.5, scale)
@@ -870,6 +915,7 @@ final class AlarmController {
     var dismissed: ((Bool) -> Void)?
     private var bursting = false
     private var burstSound: AVAudioPlayer?
+    private var clickSound: AVAudioPlayer?
     private var burstCompletion: Timer?
     private var appearance = ReminderAppearance()
     func show(restMinutes: Int, appearance: ReminderAppearance) {
@@ -885,6 +931,7 @@ final class AlarmController {
             window.isReleasedWhenClosed = false
             let view = BallsView(frame: NSRect(origin: .zero, size: screen.frame.size), appearance: appearance)
             view.doubleClicked = { [weak self] in self?.burstAndDismiss() }
+            view.catClicked = { [weak self] in self?.playCatClick() }
             view.displayRest(seconds: countdown!.remainingSeconds(at: Date()))
             window.contentView = view; window.setFrame(screen.frame, display: true)
             window.orderFrontRegardless()
@@ -899,10 +946,19 @@ final class AlarmController {
         views.forEach { $0.displayRest(seconds: seconds) }
         if countdown.isFinished(at: now) { dismiss(completed: true) }
     }
+    private func playCatClick() {
+        guard !bursting, appearance.scene == .blackCat2,
+              let url = Bundle.main.url(forResource: "CatMeow", withExtension: "wav") else { return }
+        if clickSound?.isPlaying == true { return }
+        clickSound = try? AVAudioPlayer(contentsOf: url)
+        clickSound?.numberOfLoops = 0; clickSound?.volume = 0.4; clickSound?.play()
+    }
     func burstAndDismiss() {
         guard !bursting, !windows.isEmpty else { return }
         bursting = true; watcher?.invalidate(); watcher = nil
-        if let sound = appearance.dismissalSound, let url = Bundle.main.url(forResource: sound, withExtension: "wav") {
+        if appearance.scene == .blackCat2, clickSound?.isPlaying == true {
+            burstSound = clickSound; clickSound = nil
+        } else if let sound = appearance.dismissalSound, let url = Bundle.main.url(forResource: sound, withExtension: "wav") {
             burstSound = try? AVAudioPlayer(contentsOf: url)
             burstSound?.numberOfLoops = 0
             burstSound?.volume = 0.4; burstSound?.play()
@@ -918,6 +974,7 @@ final class AlarmController {
     func dismiss(completed: Bool = false) {
         burstCompletion?.invalidate(); burstCompletion = nil
         bursting = false; burstSound?.stop(); burstSound = nil
+        clickSound?.stop(); clickSound = nil
         guard !windows.isEmpty else { return }
         watcher?.invalidate(); watcher = nil; countdown = nil
         views.forEach { $0.stop() }; views.removeAll()
@@ -1404,7 +1461,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private func endActivity() { if let activity { ProcessInfo.processInfo.endActivity(activity) }; activity = nil }
     @objc private func showUsage() {
         let alert = NSAlert(); alert.messageText = "Minutes2 使用说明"
-        alert.informativeText = "第一次单击圆盘显示阴影，再次单击开始、暂停或继续。点击其他地方取消阴影。长按圆盘约 0.35 秒后拖动可移动番茄钟。暂停后可拖动时间圆点调整剩余分钟。\n\n计时器：⌘N 新建独立番茄钟，⌘W 关闭当前番茄钟，空格开始或暂停。重复计时开启后，休息倒计时结束后会自动开始下一轮。预设时长只在设时或暂停时可用。\n\n计时器菜单可选择无、气泡或小黑猫到时场景，并独立开关休息倒计时。视图菜单可预览当前场景。双击或使用计时器菜单中的“结束休息提醒”结束；重复模式会自动开始下一轮。多个番茄钟到时会依次提醒。"
+        alert.informativeText = "第一次单击圆盘显示阴影，再次单击开始、暂停或继续。点击其他地方取消阴影。长按圆盘约 0.35 秒后拖动可移动番茄钟。暂停后可拖动时间圆点调整剩余分钟。\n\n计时器：⌘N 新建独立番茄钟，⌘W 关闭当前番茄钟，空格开始或暂停。重复计时开启后，休息倒计时结束后会自动开始下一轮。预设时长只在设时或暂停时可用。\n\n计时器菜单可选择无、气泡、小黑猫或小黑猫2到时场景，并独立开关休息倒计时。视图菜单可预览当前场景。双击或使用计时器菜单中的“结束休息提醒”结束；重复模式会自动开始下一轮。多个番茄钟到时会依次提醒。"
         alert.addButton(withTitle: "知道了"); alert.runModal()
     }
     @objc private func about() { aboutWindow.present() }
