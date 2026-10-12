@@ -1212,9 +1212,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     func timerMenu(includeQuit: Bool = false, includeRest: Bool = false) -> NSMenu {
         let menu = NSMenu(title: "计时器")
         let new = menuItem("新建番茄钟", #selector(newTimer), key: "n")
-        new.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil); menu.addItem(new)
+        menu.addItem(new)
         let close = menuItem("关闭番茄钟", #selector(closeTimer), key: "w")
-        close.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil); menu.addItem(close)
+        menu.addItem(close)
         menu.addItem(.separator())
         let toggle = menuItem(active?.engine.phase == .running ? "暂停计时" : "开始计时", #selector(toggleTimer), key: " ")
         toggle.keyEquivalentModifierMask = []; menu.addItem(toggle)
