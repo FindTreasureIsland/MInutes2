@@ -29,3 +29,26 @@ public struct TimerAlarms {
         return active?.timerID == id
     }
 }
+
+/// Visuals and the optional clock are independent of the actual rest duration.
+public enum ReminderScene: String, CaseIterable {
+    case none, bubbles, blackCat
+    public var title: String {
+        switch self {
+        case .none: return "无"
+        case .bubbles: return "气泡"
+        case .blackCat: return "小黑猫"
+        }
+    }
+}
+
+public struct ReminderAppearance {
+    public let scene: ReminderScene
+    public let showsCountdown: Bool
+    public var hasVisibleOverlay: Bool { scene != .none || showsCountdown }
+    public var playsPopSound: Bool { scene == .bubbles }
+    public init(scene: String? = nil, showsCountdown: Bool = true) {
+        self.scene = scene.flatMap(ReminderScene.init(rawValue:)) ?? .bubbles
+        self.showsCountdown = showsCountdown
+    }
+}

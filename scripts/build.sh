@@ -27,7 +27,7 @@ APP_PATH="$PWD/build/Minutes2.app"
 mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources"
 cp "$BIN_DIR/Minutes2" "$APP_PATH/Contents/MacOS/Minutes2"
 cp Resources/Info.plist "$APP_PATH/Contents/Info.plist"
-cp Resources/BubblePop.wav "$APP_PATH/Contents/Resources/"
+cp Resources/BubblePop.wav Resources/BlackCat.png "$APP_PATH/Contents/Resources/"
 mkdir -p "$APP_PATH/Contents/Resources/music"
 cp music/*.mp3 "$APP_PATH/Contents/Resources/music/"
 if [[ -f Resources/AppIcon.icns ]]; then

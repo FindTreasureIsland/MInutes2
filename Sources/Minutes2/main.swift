@@ -725,8 +725,14 @@ private enum BubbleAppearance {
 final class BallsView: NSView {
     var doubleClicked: (() -> Void)?
     private let restDigits = RestDigitsView()
+    private let sceneAppearance: ReminderAppearance
+    private lazy var catImage: CGImage? = {
+        guard let url = Bundle.main.url(forResource: "BlackCat", withExtension: "png"),
+              let image = NSImage(contentsOf: url) else { return nil }
+        return image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+    }()
     func displayRest(seconds: Int) {
-        restDigits.seconds = seconds
+        if sceneAppearance.showsCountdown { restDigits.seconds = seconds }
         setAccessibilityValue("休息剩余 \(seconds / 60) 分 \(seconds % 60) 秒，双击结束")
     }
     override func mouseDown(with event: NSEvent) {
@@ -745,7 +751,8 @@ final class BallsView: NSView {
         NSColor(srgbRed: 1, green: 0.37, blue: 0.26, alpha: 1)
     ]
     private lazy var bubbleImages = palette.compactMap { BubbleAppearance.image(color: $0) }
-    override init(frame: NSRect) {
+    init(frame: NSRect, appearance: ReminderAppearance = ReminderAppearance()) {
+        self.sceneAppearance = appearance
         super.init(frame: frame)
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
@@ -754,10 +761,13 @@ final class BallsView: NSView {
         setAccessibilityRole(.group)
         setAccessibilityLabel("休息倒计时，彩球提醒，双击结束")
         restDigits.frame = bounds; restDigits.autoresizingMask = [.width, .height]
+        restDigits.isHidden = !sceneAppearance.showsCountdown
         addSubview(restDigits)
-        addBall()
-        clock = Timer(timeInterval: 0.45, repeats: true) { [weak self] _ in self?.addBall() }
-        RunLoop.main.add(clock!, forMode: .common)
+        if sceneAppearance.scene != .none {
+            addBall()
+            clock = Timer(timeInterval: 0.45, repeats: true) { [weak self] _ in self?.addBall() }
+            RunLoop.main.add(clock!, forMode: .common)
+        }
     }
     required init?(coder: NSCoder) { fatalError() }
     func stop() { clock?.invalidate(); clock = nil }
@@ -780,7 +790,7 @@ final class BallsView: NSView {
             expansion.beginTime = fade.beginTime; expansion.fillMode = .both
             expansion.isRemovedOnCompletion = false; ball.add(expansion, forKey: "burstExpand")
             // Limit particle work after long rests while every bubble still pops and fades.
-            guard index < 120 else { continue }
+            guard sceneAppearance.scene == .bubbles, index < 120 else { continue }
             let radius = ball.bounds.width / 2
             for part in 0..<8 {
                 let angle = CGFloat(part) / 8 * .pi * 2 + CGFloat.random(in: -0.15...0.15)
@@ -810,15 +820,24 @@ final class BallsView: NSView {
         CATransaction.commit()
     }
     private func addBall() {
-        guard let layer else { return }
+        guard sceneAppearance.scene != .none, let layer else { return }
         let scale = min(bounds.width / 1470, bounds.height / 956)
         let radius = CGFloat.random(in: 36...80) * max(0.5, scale)
         let ball = CALayer()
         ball.bounds = NSRect(x: 0, y: 0, width: 2 * radius, height: 2 * radius)
         ball.position = NSPoint(x: CGFloat.random(in: 0...bounds.width), y: CGFloat.random(in: 0...bounds.height))
-        let colorIndex = Int.random(in: 0..<bubbleImages.count)
-        ball.contents = bubbleImages[colorIndex]
-        bubbles.append((ball, palette[colorIndex]))
+        if sceneAppearance.scene == .blackCat {
+            guard let catImage else { return }
+            let aspect = CGFloat(catImage.height) / CGFloat(catImage.width)
+            ball.bounds.size.height = ball.bounds.width * aspect
+            ball.contents = catImage
+            ball.transform = CATransform3DMakeRotation(CGFloat.random(in: -.pi ... .pi), 0, 0, 1)
+            bubbles.append((ball, .white))
+        } else {
+            let colorIndex = Int.random(in: 0..<bubbleImages.count)
+            ball.contents = bubbleImages[colorIndex]
+            bubbles.append((ball, palette[colorIndex]))
+        }
         ball.contentsGravity = .resizeAspect
         ball.contentsScale = window?.backingScaleFactor ?? 2
         ball.shadowColor = NSColor.black.cgColor
@@ -851,17 +870,19 @@ final class AlarmController {
     private var bursting = false
     private var burstSound: AVAudioPlayer?
     private var burstCompletion: Timer?
-    func show(restMinutes: Int) {
+    private var appearance = ReminderAppearance()
+    func show(restMinutes: Int, appearance: ReminderAppearance) {
+        self.appearance = appearance
         countdown = RestCountdown(minutes: restMinutes, at: Date())
         for screen in NSScreen.screens {
             let window = ReminderWindow(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             window.level = .screenSaver
             window.backgroundColor = .clear; window.isOpaque = false; window.hasShadow = false
-            window.ignoresMouseEvents = false
+            window.ignoresMouseEvents = !appearance.hasVisibleOverlay
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
             window.hidesOnDeactivate = false
             window.isReleasedWhenClosed = false
-            let view = BallsView(frame: NSRect(origin: .zero, size: screen.frame.size))
+            let view = BallsView(frame: NSRect(origin: .zero, size: screen.frame.size), appearance: appearance)
             view.doubleClicked = { [weak self] in self?.burstAndDismiss() }
             view.displayRest(seconds: countdown!.remainingSeconds(at: Date()))
             window.contentView = view; window.setFrame(screen.frame, display: true)
@@ -877,10 +898,10 @@ final class AlarmController {
         views.forEach { $0.displayRest(seconds: seconds) }
         if countdown.isFinished(at: now) { dismiss(completed: true) }
     }
-    private func burstAndDismiss() {
+    func burstAndDismiss() {
         guard !bursting, !windows.isEmpty else { return }
         bursting = true; watcher?.invalidate(); watcher = nil
-        if let url = Bundle.main.url(forResource: "BubblePop", withExtension: "wav") {
+        if appearance.playsPopSound, let url = Bundle.main.url(forResource: "BubblePop", withExtension: "wav") {
             burstSound = try? AVAudioPlayer(contentsOf: url)
             burstSound?.volume = 0.4; burstSound?.play()
         }
@@ -1081,6 +1102,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let saved = UserDefaults.standard.integer(forKey: "restMinutes")
         return RestCountdown.minuteOptions.contains(saved) ? saved : 5
     }()
+    private var reminderScene = UserDefaults.standard.string(forKey: "reminderScene")
+        .flatMap(ReminderScene.init(rawValue:)) ?? .bubbles
+    private var showsRestCountdown = UserDefaults.standard.object(forKey: "showsRestCountdown") as? Bool ?? true
     private var clickMonitor: Any?
     private var active: TimerSession? {
         sessions.first(where: { $0.window === NSApp.keyWindow }) ?? lastActive ?? sessions.last
@@ -1137,7 +1161,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         toggle.keyEquivalentModifierMask = []; menu.addItem(toggle)
         let repeats = menuItem("重复计时", #selector(toggleRepeats)); repeats.state = active?.engine.repeats == true ? .on : .off
         menu.addItem(repeats)
+        if isPresentingAlarm { menu.addItem(menuItem("结束休息提醒", #selector(stopReminder))) }
         if includeRest {
+            let sceneItem = NSMenuItem(title: "到时场景", action: nil, keyEquivalent: "")
+            let sceneMenu = NSMenu(title: "到时场景")
+            for (index, scene) in ReminderScene.allCases.enumerated() {
+                let choice = menuItem(scene.title, #selector(changeScene(_:)))
+                choice.tag = index; choice.state = reminderScene == scene ? .on : .off
+                sceneMenu.addItem(choice)
+            }
+            sceneItem.submenu = sceneMenu; menu.addItem(sceneItem)
+            let countdownItem = menuItem("显示休息倒计时", #selector(toggleRestCountdown))
+            countdownItem.state = showsRestCountdown ? .on : .off; menu.addItem(countdownItem)
+
             let item = NSMenuItem(title: "休息时间", action: nil, keyEquivalent: "")
             let submenu = NSMenu(title: "休息时间")
             for minutes in RestCountdown.minuteOptions {
@@ -1179,7 +1215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         add("Minutes2", appMenu); add("计时器", timerMenu(includeRest: true))
         let view = NSMenu(title: "视图")
         view.addItem(menuItem("保持在前台", #selector(toggleTop))); view.addItem(.separator())
-        view.addItem(menuItem("预览彩球提醒", #selector(previewAlarm))); view.addItem(.separator())
+        view.addItem(menuItem("预览到时场景", #selector(previewAlarm))); view.addItem(.separator())
         let sizeItem = NSMenuItem(title: "大小", action: nil, keyEquivalent: "")
         let sizeMenu = NSMenu(title: "大小")
         for percent in TimerSession.sizeOptions {
@@ -1212,6 +1248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
+        case #selector(stopReminder): return isPresentingAlarm
         case #selector(newTimer): return !isPresentingAlarm
         case #selector(closeTimer): return active != nil
         case #selector(toggleTimer), #selector(showSounds): return active != nil && active?.engine.phase != .alarm && !isPresentingAlarm
@@ -1247,6 +1284,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard validateMenuItem(sender) else { return }
         active?.setSpeed(sender.tag)
     }
+    @objc private func changeScene(_ sender: NSMenuItem) {
+        guard ReminderScene.allCases.indices.contains(sender.tag) else { return }
+        reminderScene = ReminderScene.allCases[sender.tag]
+        UserDefaults.standard.set(reminderScene.rawValue, forKey: "reminderScene"); refresh()
+    }
+    @objc private func toggleRestCountdown() {
+        showsRestCountdown.toggle()
+        UserDefaults.standard.set(showsRestCountdown, forKey: "showsRestCountdown"); refresh()
+    }
+    @objc private func stopReminder() { alarm.burstAndDismiss() }
     @objc private func changeRest(_ sender: NSMenuItem) {
         guard RestCountdown.minuteOptions.contains(sender.tag) else { return }
         restMinutes = sender.tag; UserDefaults.standard.set(restMinutes, forKey: "restMinutes"); refresh()
@@ -1289,7 +1336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             alarms.dismiss(); presentNextAlarm(); return
         }
         session.showingAlarm = true; session.soundPopover.close(); session.audio.stop(); session.window.orderOut(nil)
-        alarm.show(restMinutes: restMinutes); session.audio.play(loop: true)
+        alarm.show(restMinutes: restMinutes, appearance: ReminderAppearance(scene: reminderScene.rawValue, showsCountdown: showsRestCountdown)); session.audio.play(loop: true)
     }
     private func finishAlarm(completed: Bool) {
         guard let request = alarms.dismiss() else { return }
@@ -1329,7 +1376,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             button.title = String(format: " %d:%02d%@", seconds / 60, seconds % 60, session.engine.phase == .paused ? " Ⅱ" : "")
             button.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         } else { button.title = "" }
-        button.toolTip = isPresentingAlarm ? "休息倒计时，双击结束提醒" : "Minutes2 · \(sessions.count) 个番茄钟"
+        button.toolTip = isPresentingAlarm ? "休息提醒，可从计时器菜单结束" : "Minutes2 · \(sessions.count) 个番茄钟"
     }
     private func updateDockIcon() {
         let now = Date()
@@ -1354,7 +1401,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private func endActivity() { if let activity { ProcessInfo.processInfo.endActivity(activity) }; activity = nil }
     @objc private func showUsage() {
         let alert = NSAlert(); alert.messageText = "Minutes2 使用说明"
-        alert.informativeText = "第一次单击圆盘显示阴影，再次单击开始、暂停或继续。点击其他地方取消阴影。长按圆盘约 0.35 秒后拖动可移动番茄钟。暂停后可拖动时间圆点调整剩余分钟。\n\n计时器：⌘N 新建独立番茄钟，⌘W 关闭当前番茄钟，空格开始或暂停。重复计时开启后，休息倒计时结束后会自动开始下一轮。预设时长只在设时或暂停时可用。\n\n视图菜单可保持在前台或预览泡泡。到时泡泡持续叠加在桌面上；双击结束提醒。多个番茄钟到时会依次提醒。"
+        alert.informativeText = "第一次单击圆盘显示阴影，再次单击开始、暂停或继续。点击其他地方取消阴影。长按圆盘约 0.35 秒后拖动可移动番茄钟。暂停后可拖动时间圆点调整剩余分钟。\n\n计时器：⌘N 新建独立番茄钟，⌘W 关闭当前番茄钟，空格开始或暂停。重复计时开启后，休息倒计时结束后会自动开始下一轮。预设时长只在设时或暂停时可用。\n\n计时器菜单可选择无、气泡或小黑猫到时场景，并独立开关休息倒计时。视图菜单可预览当前场景。双击或使用计时器菜单中的“结束休息提醒”结束；重复模式会自动开始下一轮。多个番茄钟到时会依次提醒。"
         alert.addButton(withTitle: "知道了"); alert.runModal()
     }
     @objc private func about() { aboutWindow.present() }
