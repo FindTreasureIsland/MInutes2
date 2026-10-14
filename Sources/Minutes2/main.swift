@@ -918,9 +918,9 @@ final class AlarmController {
     private var clickSound: AVAudioPlayer?
     private var burstCompletion: Timer?
     private var appearance = ReminderAppearance()
-    func show(restMinutes: Int, appearance: ReminderAppearance) {
+    func show(restMinutes: Int, appearance: ReminderAppearance, at now: Date = Date()) {
         self.appearance = appearance
-        countdown = RestCountdown(minutes: restMinutes, at: Date())
+        countdown = RestCountdown(minutes: restMinutes, at: now)
         for screen in NSScreen.screens {
             let window = ReminderWindow(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             window.level = .screenSaver
@@ -1085,20 +1085,32 @@ final class TimerSession: NSObject, NSWindowDelegate, NSPopoverDelegate {
     func setSpeed(_ multiplier: Int) {
         guard !closed, app?.isPresentingAlarm == false, engine.phase != .alarm,
               TimerEngine.speedOptions.contains(multiplier) else { return }
-        let now = Date()
+        let now = Date(), oldDeadline = engine.deadline
         engine.setSpeed(multiplier, at: now)
         UserDefaults.standard.set(engine.speedMultiplier, forKey: "speedMultiplier")
-        if engine.tick(at: now) { app?.enqueueAlarm(self) }
+        if engine.tick(at: now) {
+            app?.usage.finishWork(id, at: oldDeadline ?? now)
+            app?.enqueueAlarm(self)
+        } else if let deadline = engine.deadline { app?.usage.updateDeadline(id, deadline: deadline) }
+        app?.usage.checkpoint(at: now, force: true)
         app?.sessionChanged(self)
     }
     func toggleTimer() {
         guard !closed, !dial.isChoosingMusic, app?.isPresentingAlarm == false, engine.phase != .alarm else { return }
-        audio.stop(); soundPopover.close(); engine.toggle(at: Date())
-        if engine.phase == .alarm { app?.enqueueAlarm(self) }
+        let now = Date(), previous = engine.phase, oldDeadline = engine.deadline
+        audio.stop(); soundPopover.close(); engine.toggle(at: now)
+        if engine.phase == .running, let deadline = engine.deadline {
+            app?.usage.beginWork(id, at: now, deadline: deadline, continuing: previous == .paused)
+        } else if engine.phase == .paused { app?.usage.pauseWork(id, at: now) }
+        else if engine.phase == .alarm {
+            app?.usage.finishWork(id, at: oldDeadline ?? now)
+            app?.enqueueAlarm(self)
+        }
         app?.sessionChanged(self)
     }
     func resetTimer() {
         dial.closeMusicSelection()
+        app?.usage.abandon(id, at: Date())
         engine.reset(); audio.stop(); app?.cancelAlarm(id); app?.sessionChanged(self)
     }
     func showWindow() {
@@ -1153,6 +1165,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var statusItem: NSStatusItem!
     private var activity: NSObjectProtocol?
     private lazy var aboutWindow = AboutWindowController()
+    lazy var usage: UsageStore = {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return UsageStore(url: base.appendingPathComponent("Minutes2/usage-statistics.json"))
+    }()
+    private lazy var statisticsWindow = StatisticsWindowController(store: usage)
     private var dockIconWasDynamic = false
     private var dockLastUpdated: TimeInterval = 0
     private let defaultDockIcon = NSImage(named: "AppIcon")
@@ -1173,6 +1190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = NSImage(systemSymbolName: "timer", accessibilityDescription: "Minutes2 番茄钟")
         alarm.dismissed = { [weak self] completed in self?.finishAlarm(completed: completed) }
+        usage.checkpoint(at: Date(), force: true)
         newTimer()
         ticker = Timer(timeInterval: 0.20, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(ticker!, forMode: .common)
@@ -1195,9 +1213,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         nextNumber += 1; sessions.append(session); lastActive = session
         session.showWindow(); sessionChanged(session)
     }
-    @objc private func closeTimer() { active?.window.close() }
+    @objc private func closeTimer() {
+        if NSApp.keyWindow?.windowController is StatisticsWindowController || NSApp.keyWindow?.windowController is AboutWindowController {
+            NSApp.keyWindow?.performClose(nil)
+        } else { active?.window.close() }
+    }
     func removeSession(_ session: TimerSession) {
         guard !session.closed else { return }
+        usage.abandon(session.id, at: Date())
         session.closed = true; session.soundPopover.close(); session.audio.stop(); session.dial.clearFocus()
         sessions.removeAll { $0 === session }
         if lastActive === session { lastActive = sessions.last }
@@ -1293,6 +1316,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             item.tag = multiplier; speedMenu.addItem(item)
         }
         speedItem.submenu = speedMenu; view.addItem(speedItem)
+        view.addItem(.separator())
+        view.addItem(menuItem("使用统计…", #selector(showStatistics)))
         add("视图", view)
         let windows = NSMenu(title: "窗口")
         windows.addItem(menuItem("居中显示", #selector(centerWindow)))
@@ -1306,7 +1331,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         switch item.action {
         case #selector(stopReminder): return isPresentingAlarm
         case #selector(newTimer): return !isPresentingAlarm
-        case #selector(closeTimer): return active != nil
+        case #selector(closeTimer): return active != nil || NSApp.keyWindow?.windowController is StatisticsWindowController || NSApp.keyWindow?.windowController is AboutWindowController
         case #selector(toggleTimer), #selector(showSounds): return active != nil && active?.engine.phase != .alarm && !isPresentingAlarm
         case #selector(preset(_:)): return (active?.engine.phase == .setting || active?.engine.phase == .paused) && !isPresentingAlarm
         case #selector(changeSpeed(_:)): return active != nil && active?.engine.phase != .alarm && !isPresentingAlarm
@@ -1378,6 +1403,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         stayOnTop.toggle(); UserDefaults.standard.set(stayOnTop, forKey: "stayOnTop")
         sessions.forEach { $0.window.level = stayOnTop ? .floating : .normal }; refresh()
     }
+    @objc private func showStatistics() { statisticsWindow.present() }
     @objc private func previewAlarm() {
         guard let active, active.engine.phase == .setting, !isPresentingAlarm else { return }
         enqueueAlarm(active, preview: true)
@@ -1392,15 +1418,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             alarms.dismiss(); presentNextAlarm(); return
         }
         session.showingAlarm = true; session.soundPopover.close(); session.audio.stop(); session.window.orderOut(nil)
-        alarm.show(restMinutes: restMinutes, appearance: ReminderAppearance(scene: reminderScene.rawValue, showsCountdown: showsRestCountdown)); session.audio.play(loop: true)
+        let now = Date()
+        if !request.preview { usage.beginRest(session.id, at: now, deadline: now.addingTimeInterval(Double(restMinutes * 60))) }
+        alarm.show(restMinutes: restMinutes, appearance: ReminderAppearance(scene: reminderScene.rawValue, showsCountdown: showsRestCountdown), at: now)
+        session.audio.play(loop: true)
     }
     private func finishAlarm(completed: Bool) {
         guard let request = alarms.dismiss() else { return }
+        let now = Date()
+        if !request.preview { usage.finishRest(request.timerID, at: now) }
         if let session = sessions.first(where: { $0.id == request.timerID }) {
             session.audio.stop(); session.showingAlarm = false
             if !terminating {
                 if !request.preview {
-                    session.engine.dismissAlarm(at: Date())
+                    session.engine.dismissAlarm(at: now)
+                    if session.engine.phase == .running, let deadline = session.engine.deadline {
+                        usage.beginWork(session.id, at: now, deadline: deadline)
+                    }
                 }
                 session.showWindow(); session.dial.refresh()
             }
@@ -1412,12 +1446,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let now = Date()
         var ended = false
         for session in sessions {
+            let deadline = session.engine.deadline
             if session.engine.tick(at: now) {
+                usage.finishWork(session.id, at: deadline ?? now)
                 session.window.orderOut(nil); alarms.enqueue(session.id); ended = true
             }
             if !session.showingAlarm { session.dial.refresh() }
         }
         presentNextAlarm()
+        usage.checkpoint(at: now)
         if ended { refresh(); syncActivity() } else { updateStatus() }
     }
     @objc private func wokeUp() { tick() }
@@ -1466,6 +1503,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     func applicationDidResignActive(_ notification: Notification) { sessions.forEach { $0.dial.clearFocus() } }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showWindow(); return true }
     func applicationWillTerminate(_ notification: Notification) {
+        let now = Date()
+        for session in sessions where session.engine.phase == .running {
+            if let deadline = session.engine.deadline, deadline <= now { usage.finishWork(session.id, at: deadline) }
+        }
+        usage.finishAll(at: now)
         terminating = true; ticker?.invalidate()
         if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
         sessions.forEach { $0.window.saveFrame(usingName: $0.frameName); $0.soundPopover.close(); $0.audio.stop() }
