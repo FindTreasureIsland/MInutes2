@@ -1138,7 +1138,7 @@ final class TimerSession: NSObject, NSWindowDelegate, NSPopoverDelegate {
     }
     func timerMenu() -> NSMenu {
         window.makeKeyAndOrderFront(nil); app?.activateSession(self)
-        return app?.timerMenu(includeRest: true) ?? NSMenu()
+        return app?.timerMenu(includeRest: true, includeQuit: true) ?? NSMenu()
     }
     func popoverDidClose(_ notification: Notification) { if !showingAlarm { audio.stop() } }
     func windowDidBecomeKey(_ notification: Notification) { app?.activateSession(self) }
@@ -1232,7 +1232,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private func menuItem(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; return item
     }
-    func timerMenu(includeRest: Bool = false) -> NSMenu {
+    func timerMenu(includeRest: Bool = false, includeQuit: Bool = false) -> NSMenu {
         let menu = NSMenu(title: "计时器")
         let new = menuItem("新建番茄钟", #selector(newTimer), key: "n")
         menu.addItem(new)
@@ -1275,6 +1275,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         menu.addItem(.separator())
         menu.addItem(menuItem("重置计时", #selector(resetTimer), key: "r"))
         menu.addItem(menuItem("到时音乐…", #selector(showSounds)))
+        if includeQuit {
+            menu.addItem(.separator())
+            menu.addItem(menuItem("退出 Minutes2", #selector(quit), key: "q"))
+        }
         return menu
     }
     private func makeMenu() {
