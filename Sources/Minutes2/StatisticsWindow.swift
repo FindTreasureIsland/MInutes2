@@ -18,11 +18,7 @@ private enum StatsStyle {
         let font = NSFont.systemFont(ofSize: size, weight: weight)
         return font.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: size) } ?? font
     }
-    static func card(_ rect: NSRect) {
-        let path = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 20, yRadius: 20)
-        NSColor.controlBackgroundColor.withAlphaComponent(dark ? 0.58 : 0.72).setFill(); path.fill()
-        NSColor.labelColor.withAlphaComponent(0.08).setStroke(); path.lineWidth = 1; path.stroke()
-    }
+
 }
 
 private enum StatsFormat {
@@ -63,7 +59,6 @@ private final class StatisticsChart: NSView {
     }
     override func mouseExited(with event: NSEvent) { selected = nil; needsDisplay = true }
     override func draw(_ dirtyRect: NSRect) {
-        StatsStyle.card(bounds)
         let workColor = StatsStyle.work, restColor = StatsStyle.rest, otherColor = NSColor.labelColor.withAlphaComponent(0.10)
         let legend = timeMode ? ["工作时间", bars ? "休息时间" : "休息时间（虚线）"] : ["工作次数", bars ? "休息次数" : "休息次数（虚线）"]
         for (index, label) in legend.enumerated() {
@@ -159,7 +154,7 @@ private final class StatisticsHeatmap: NSView {
     }
     override func mouseExited(with event: NSEvent) { hovered = nil; needsDisplay = true }
     override func draw(_ dirtyRect: NSRect) {
-        StatsStyle.card(bounds); cells.removeAll()
+        cells.removeAll()
         let calendar = Calendar.current
         let largest = max(timeMode ? 7200 : 4, days.map { timeMode ? $0.summary.workSeconds : Double($0.summary.workCount) }.max() ?? 0)
         guard let first = days.first else { return }
@@ -201,7 +196,6 @@ private final class StatisticsOverview: NSView {
     override var isFlipped: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
         let width = bounds.width, workWidth = width * 0.64
-        StatsStyle.card(NSRect(x: 0, y: 0, width: workWidth, height: bounds.height))
         let circle = NSRect(x: 18, y: (bounds.height - 112) / 2, width: 112, height: 112)
         let path = NSBezierPath(ovalIn: circle)
         NSGradient(colors: [NSColor(srgbRed: 0.04, green: 0.49, blue: 0.60, alpha: 1),
@@ -219,7 +213,6 @@ private final class StatisticsOverview: NSView {
         StatsFormat.draw(available ? StatsFormat.duration(total.workSeconds) : "—", in: NSRect(x: x, y: middle - 14, width: workWidth - x - 16, height: 32), size: 22, color: StatsStyle.work, weight: .medium)
         StatsFormat.draw(available ? "今天 \(today.workCount)次 · \(StatsFormat.duration(today.workSeconds))" : "统计记录暂不可用", in: NSRect(x: x, y: middle + 29, width: workWidth - x - 16, height: 20), size: 11)
         let restX = workWidth + 12, restWidth = width - restX
-        StatsStyle.card(NSRect(x: restX, y: 0, width: restWidth, height: bounds.height))
         for (index, pair) in [("累计休息次数", "\(total.restCount) 次"), ("累计休息时间", StatsFormat.duration(total.restSeconds))].enumerated() {
             let top = CGFloat(index) * bounds.height / 2 + 15
             let symbol = NSImage(systemSymbolName: index == 0 ? "cup.and.saucer" : "leaf", accessibilityDescription: pair.0)
