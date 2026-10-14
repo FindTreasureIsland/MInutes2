@@ -252,6 +252,24 @@ private final class StatisticsDetails: NSViewController, NSTableViewDataSource, 
     @objc private func done() { if let window = view.window { window.sheetParent?.endSheet(window) } }
 }
 
+/// Secondary footer actions share the glass backdrop and keep native button semantics.
+private final class StatisticsFooterButton: NSButton {
+    private var hovered = false
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas(); trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
+    }
+    override func mouseEntered(with event: NSEvent) { hovered = true; refreshAppearance() }
+    override func mouseExited(with event: NSEvent) { hovered = false; refreshAppearance() }
+    override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); refreshAppearance() }
+    func refreshAppearance() {
+        let color: NSColor = hovered ? .labelColor : StatsStyle.secondary
+        contentTintColor = color
+        attributedTitle = NSAttributedString(string: title, attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .regular), .foregroundColor: color])
+        needsDisplay = true
+    }
+}
+
 private final class StatisticsDashboard: NSView {
     let store: UsageStore
     private let chart = StatisticsChart()
@@ -265,8 +283,8 @@ private final class StatisticsDashboard: NSView {
     private let sinceLabel = NSTextField(labelWithString: "")
     private let periodLabel = NSTextField(labelWithString: "")
     private let note = NSTextField(labelWithString: "数据仅保存在此 Mac")
-    private let info = NSButton(title: "统计说明", target: nil, action: nil)
-    private let details = NSButton(title: "每日明细", target: nil, action: nil)
+    private let info = StatisticsFooterButton(title: "统计说明", target: nil, action: nil)
+    private let details = StatisticsFooterButton(title: "每日明细", target: nil, action: nil)
     private let logo = NSImageView()
     private var detailsController: StatisticsDetails?
     override var isFlipped: Bool { true }
@@ -289,11 +307,20 @@ private final class StatisticsDashboard: NSView {
         for (index, symbol) in ["circle.dotted", "chart.xyaxis.line", "square.grid.3x3"].enumerated() {
             tabs.setImage(NSImage(systemSymbolName: symbol, accessibilityDescription: nil), forSegment: index)
         }
-        for button in [info, details] { button.bezelStyle = .rounded; button.font = .systemFont(ofSize: 11); button.target = self }
+        for button in [info, details] {
+            button.isBordered = false; button.bezelStyle = .inline
+            button.font = .systemFont(ofSize: 11, weight: .regular); button.target = self
+            button.focusRingType = .default
+            button.refreshAppearance(); button.toolTip = button.title
+        }
         info.action = #selector(showInfo); details.action = #selector(showDetails)
         info.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: nil)
         details.image = NSImage(systemSymbolName: "list.bullet", accessibilityDescription: nil)
-        info.imagePosition = .imageLeading; details.imagePosition = .imageLeading
+        for button in [info, details] {
+            button.image = button.image?.withSymbolConfiguration(.init(pointSize: 11, weight: .regular))
+            button.image?.size = NSSize(width: 12, height: 12)
+            button.imagePosition = .imageLeft
+        }
         for page in [overview, chart, heatmap] { page.setAccessibilityElement(true); page.setAccessibilityRole(.image) }
         chart.toolTip = "悬停查看每日数据，或点按每日明细打开数据表"
         heatmap.toolTip = "每格代表一天，深色表示更多专注；每日明细支持键盘和辅助功能"
