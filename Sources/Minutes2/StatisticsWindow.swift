@@ -3,6 +3,28 @@ import AppKit
 import MinutesCore
 #endif
 
+private enum StatsStyle {
+    static var dark: Bool { NSAppearance.currentDrawing().bestMatch(from: [.darkAqua, .aqua]) == .darkAqua }
+    static var secondary: NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor(srgbRed: 0.73, green: 0.75, blue: 0.76, alpha: 1)
+                : NSColor(srgbRed: 0.34, green: 0.37, blue: 0.39, alpha: 1)
+        }
+    }
+    static var work: NSColor { dark ? .systemTeal : NSColor(srgbRed: 0, green: 0.43, blue: 0.57, alpha: 1) }
+    static var rest: NSColor { dark ? .systemOrange : NSColor(srgbRed: 0.69, green: 0.30, blue: 0.13, alpha: 1) }
+    static func rounded(_ size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
+        let font = NSFont.systemFont(ofSize: size, weight: weight)
+        return font.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: size) } ?? font
+    }
+    static func card(_ rect: NSRect) {
+        let path = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 20, yRadius: 20)
+        NSColor.controlBackgroundColor.withAlphaComponent(dark ? 0.58 : 0.72).setFill(); path.fill()
+        NSColor.labelColor.withAlphaComponent(0.08).setStroke(); path.lineWidth = 1; path.stroke()
+    }
+}
+
 private enum StatsFormat {
     static func duration(_ seconds: Double) -> String {
         let total = max(0, Int(seconds)), h = total / 3600, m = total / 60 % 60, s = total % 60
@@ -15,10 +37,10 @@ private enum StatsFormat {
     static func detail(_ day: UsageDay) -> String {
         "\(date(day.date, format: "yyyy年M月d日"))  ·  工作 \(duration(day.summary.workSeconds))（\(day.summary.workCount)次）  ·  休息 \(duration(day.summary.restSeconds))（\(day.summary.restCount)次）"
     }
-    static func draw(_ text: String, in rect: NSRect, size: CGFloat = 11, color: NSColor = .secondaryLabelColor,
+    static func draw(_ text: String, in rect: NSRect, size: CGFloat = 11, color: NSColor = StatsStyle.secondary,
                      weight: NSFont.Weight = .regular, alignment: NSTextAlignment = .left) {
         let style = NSMutableParagraphStyle(); style.alignment = alignment
-        (text as NSString).draw(in: rect, withAttributes: [.font: NSFont.systemFont(ofSize: size, weight: weight),
+        (text as NSString).draw(in: rect, withAttributes: [.font: StatsStyle.rounded(size, weight: weight),
                                                          .foregroundColor: color, .paragraphStyle: style])
     }
 }
@@ -41,8 +63,8 @@ private final class StatisticsChart: NSView {
     }
     override func mouseExited(with event: NSEvent) { selected = nil; needsDisplay = true }
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.controlBackgroundColor.setFill(); NSBezierPath(roundedRect: bounds, xRadius: 12, yRadius: 12).fill()
-        let workColor = NSColor.systemBlue, restColor = NSColor.systemGreen, otherColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.3)
+        StatsStyle.card(bounds)
+        let workColor = StatsStyle.work, restColor = StatsStyle.rest, otherColor = NSColor.labelColor.withAlphaComponent(0.10)
         let legend = timeMode ? ["工作时间", bars ? "休息时间" : "休息时间（虚线）"] : ["工作次数", bars ? "休息次数" : "休息次数（虚线）"]
         for (index, label) in legend.enumerated() {
             (index == 0 ? workColor : restColor).setFill()
@@ -116,14 +138,14 @@ private final class StatisticsChart: NSView {
             let x = rect.minX + (CGFloat(index) + 0.5) * stepWidth
             StatsFormat.draw(StatsFormat.date(days[index].date), in: NSRect(x: x - 24, y: rect.maxY + 8, width: 48, height: 18), alignment: .center)
         }
-        let detail = selected.map { StatsFormat.detail(days[$0]) } ?? "移动鼠标查看每日明细"
+        let detail = selected.map { StatsFormat.detail(days[$0]) } ?? "悬停查看每日数据 · 也可打开明细"
         StatsFormat.draw(detail, in: NSRect(x: 20, y: bounds.height - 25, width: bounds.width - 40, height: 20), size: 11)
-        setAccessibilityLabel("\(timeMode ? "时间" : "次数")\(bars ? "柱状图" : "折线图")，工作蓝色，休息绿色，\(days.count)天")
+        setAccessibilityLabel("\(timeMode ? "时间" : "次数")\(bars ? "柱状图" : "折线图")，工作青色，休息橙色，\(days.count)天")
     }
 }
 
 private final class StatisticsHeatmap: NSView {
-    var days: [UsageDay] = [] { didSet { hovered = nil; needsDisplay = true } }
+    var days: [UsageDay] = [] { didSet { needsDisplay = true } }
     var timeMode = true { didSet { needsDisplay = true } }
     private var cells: [(NSRect, UsageDay)] = []
     private var hovered: UsageDay?
@@ -133,140 +155,241 @@ private final class StatisticsHeatmap: NSView {
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
     }
     override func mouseMoved(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        hovered = cells.first { $0.0.contains(point) }?.1; needsDisplay = true
+        hovered = cells.first { $0.0.contains(convert(event.locationInWindow, from: nil)) }?.1; needsDisplay = true
     }
     override func mouseExited(with event: NSEvent) { hovered = nil; needsDisplay = true }
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.controlBackgroundColor.setFill(); NSBezierPath(roundedRect: bounds, xRadius: 12, yRadius: 12).fill()
-        cells.removeAll(); guard let first = days.first else { return }
+        StatsStyle.card(bounds); cells.removeAll()
         let calendar = Calendar.current
-        let offset = (calendar.component(.weekday, from: first.date) + 5) % 7
-        let weeks = (days.count + offset + 6) / 7
-        let pitch = min(17, (bounds.width - 72) / CGFloat(weeks)), side = max(2, pitch - 3)
-        let xStart: CGFloat = 43, yStart: CGFloat = 28
         let largest = max(timeMode ? 7200 : 4, days.map { timeMode ? $0.summary.workSeconds : Double($0.summary.workCount) }.max() ?? 0)
-        for row in [0, 2, 4, 6] {
-            StatsFormat.draw(["一", "二", "三", "四", "五", "六", "日"][row], in: NSRect(x: 17, y: yStart + CGFloat(row) * pitch, width: 18, height: 18), size: 10)
-        }
-        var previousMonth = -1
-        for (index, day) in days.enumerated() {
-            let column = (index + offset) / 7, row = (index + offset) % 7
-            let rect = NSRect(x: xStart + CGFloat(column) * pitch, y: yStart + CGFloat(row) * pitch, width: side, height: side)
-            let value = timeMode ? day.summary.workSeconds : Double(day.summary.workCount)
-            let strength = value <= 0 ? 0 : min(1, max(0.18, value / largest))
-            (strength == 0 ? NSColor.quaternaryLabelColor.withAlphaComponent(0.12) : NSColor.systemBlue.withAlphaComponent(0.2 + strength * 0.8)).setFill()
-            NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2).fill(); cells.append((rect, day))
-            let month = calendar.component(.month, from: day.date)
-            if month != previousMonth {
-                StatsFormat.draw("\(month)月", in: NSRect(x: rect.minX, y: 7, width: 36, height: 17), size: 10)
+        // Two half-year strips keep each daily cell legible in the compact window.
+        let middle = days.count / 2
+        for (block, group) in [Array(days.prefix(middle)), Array(days.dropFirst(middle))].enumerated() {
+            guard let first = group.first else { continue }
+            let offset = (calendar.component(.weekday, from: first.date) + 5) % 7
+            let weeks = (group.count + offset + 6) / 7
+            let blockHeight = (bounds.height - 48) / 2
+            let pitch = min(20, (bounds.width - 76) / CGFloat(weeks), (blockHeight - 36) / 7), side = pitch - 4
+            let top = CGFloat(block) * blockHeight + 16
+            let yStart = top + 24
+            let xStart = (bounds.width - CGFloat(weeks) * pitch) / 2 + 8
+            for row in [0, 2, 4, 6] {
+                StatsFormat.draw(["一", "二", "三", "四", "五", "六", "日"][row], in: NSRect(x: xStart - 28, y: yStart + CGFloat(row) * pitch, width: 18, height: 18))
+            }
+            var previousMonth = -1
+            for (index, day) in group.enumerated() {
+                let rect = NSRect(x: xStart + CGFloat((index + offset) / 7) * pitch,
+                                  y: yStart + CGFloat((index + offset) % 7) * pitch, width: side, height: side)
+                let value = timeMode ? day.summary.workSeconds : Double(day.summary.workCount)
+                let strength = value <= 0 ? 0 : min(1, max(0.18, value / largest))
+                (strength == 0 ? NSColor.labelColor.withAlphaComponent(0.06) : StatsStyle.work.withAlphaComponent(0.2 + strength * 0.8)).setFill()
+                NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3).fill(); cells.append((rect, day))
+                let month = calendar.component(.month, from: day.date)
+                if month != previousMonth && index >= 14 {
+                    StatsFormat.draw("\(month)月", in: NSRect(x: rect.minX, y: top, width: 36, height: 18))
+                }
                 previousMonth = month
+                if hovered?.date == day.date {
+                    NSColor.labelColor.setStroke(); NSBezierPath(roundedRect: rect.insetBy(dx: -1, dy: -1), xRadius: 4, yRadius: 4).stroke()
+                }
             }
         }
-        let legendY = yStart + 7 * pitch + 9
-        StatsFormat.draw(hovered.map(StatsFormat.detail) ?? "每格代表一天 · 移动鼠标查看日期、次数和时间", in: NSRect(x: 18, y: legendY, width: bounds.width - 150, height: 20), size: 10)
-        StatsFormat.draw("少", in: NSRect(x: bounds.width - 136, y: legendY, width: 18, height: 18), size: 10)
-        for i in 0..<5 {
-            NSColor.systemBlue.withAlphaComponent(0.12 + CGFloat(i) * 0.22).setFill()
-            NSBezierPath(roundedRect: NSRect(x: bounds.width - 115 + CGFloat(i) * 15, y: legendY + 2, width: 11, height: 11), xRadius: 2, yRadius: 2).fill()
-        }
-        StatsFormat.draw("多", in: NSRect(x: bounds.width - 33, y: legendY, width: 20, height: 18), size: 10)
-        setAccessibilityLabel("近一年番茄钟使用热图，每格一天，按\(timeMode ? "工作时间" : "完成次数")着色")
+        StatsFormat.draw(hovered.map(StatsFormat.detail) ?? "每格一天 · 悬停查看明细 · 颜色越深，专注越多", in: NSRect(x: 18, y: bounds.height - 30, width: bounds.width - 36, height: 22), size: 11)
+        setAccessibilityLabel("近一年专注热图，每格一天，按\(timeMode ? "工作时间" : "完成次数")着色。可通过每日明细查看完整数据。")
     }
+}
+
+private final class StatisticsOverview: NSView {
+    var total = UsageSummary() { didSet { needsDisplay = true } }
+    var today = UsageSummary() { didSet { needsDisplay = true } }
+    var available = true { didSet { needsDisplay = true } }
+    override var isFlipped: Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        let width = bounds.width, primaryHeight = bounds.height * 0.57
+        let hero = NSRect(x: 0, y: 0, width: width, height: primaryHeight)
+        StatsStyle.card(hero)
+        let circle = NSRect(x: 28, y: (primaryHeight - 142) / 2, width: 142, height: 142)
+        let path = NSBezierPath(ovalIn: circle)
+        NSGradient(colors: [NSColor(srgbRed: 0.04, green: 0.49, blue: 0.60, alpha: 1),
+                            NSColor(srgbRed: 0.03, green: 0.37, blue: 0.53, alpha: 1)])!.draw(in: path, angle: -35)
+        let arc = NSBezierPath(ovalIn: circle.insetBy(dx: 5, dy: 5)); arc.lineWidth = 3
+        NSColor.white.withAlphaComponent(0.65).setStroke(); arc.stroke()
+        StatsFormat.draw("累计完成", in: NSRect(x: 28, y: circle.minY + 29, width: 142, height: 24), size: 12, color: .white, alignment: .center)
+        let countRect = NSRect(x: 28, y: circle.minY + 51, width: 142, height: 57)
+        if available {
+            let digits = CGFloat(String(total.workCount).count)
+            CountdownDigits.draw(total.workCount, in: countRect, height: min(44, 126 * 94 / (digits * 79)))
+        } else {
+            StatsFormat.draw("—", in: countRect, size: 40, color: .white, weight: .light, alignment: .center)
+        }
+        StatsFormat.draw("次专注", in: NSRect(x: 28, y: circle.minY + 105, width: 142, height: 22), size: 12, color: .white, alignment: .center)
+        StatsFormat.draw("累计工作时间", in: NSRect(x: 198, y: primaryHeight / 2 - 58, width: width - 220, height: 25), size: 13)
+        StatsFormat.draw(available ? StatsFormat.duration(total.workSeconds) : "—", in: NSRect(x: 198, y: primaryHeight / 2 - 24, width: width - 220, height: 46), size: 29, color: StatsStyle.work, weight: .medium)
+        StatsFormat.draw(available ? "今天  \(today.workCount)次 · \(StatsFormat.duration(today.workSeconds))" : "统计记录暂不可用", in: NSRect(x: 198, y: primaryHeight / 2 + 35, width: width - 220, height: 22), size: 12)
+        let y = primaryHeight + 16, cardWidth = (width - 16) / 2, height = bounds.height - y
+        for (index, pair) in [("累计休息次数", "\(total.restCount) 次"), ("累计休息时间", StatsFormat.duration(total.restSeconds))].enumerated() {
+            let x = CGFloat(index) * (cardWidth + 16)
+            StatsStyle.card(NSRect(x: x, y: y, width: cardWidth, height: height))
+            let symbol = NSImage(systemSymbolName: index == 0 ? "cup.and.saucer" : "leaf", accessibilityDescription: pair.0)
+            symbol?.withSymbolConfiguration(.init(paletteColors: [StatsStyle.rest]))?.draw(in: NSRect(x: x + 22, y: y + 20, width: 24, height: 24))
+            StatsFormat.draw(pair.0, in: NSRect(x: x + 56, y: y + 24, width: cardWidth - 78, height: 23), size: 13)
+            StatsFormat.draw(available ? pair.1 : "—", in: NSRect(x: x + 22, y: y + 58, width: cardWidth - 44, height: 37), size: 25, color: StatsStyle.rest, weight: .medium)
+            StatsFormat.draw(index == 0 ? "工作之后，也给自己片刻放松" : "只记录实际经过的休息时间", in: NSRect(x: x + 22, y: y + height - 36, width: cardWidth - 44, height: 22), size: 11)
+        }
+        setAccessibilityLabel(available ? "累计完成\(total.workCount)次，工作\(StatsFormat.duration(total.workSeconds))，休息\(total.restCount)次，\(StatsFormat.duration(total.restSeconds))。今天完成\(today.workCount)次。" : "统计记录暂不可读取")
+    }
+}
+
+private final class StatisticsDetails: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
+    var days: [UsageDay] = []
+    private let table = NSTableView()
+    override func loadView() {
+        view = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 380))
+        let scroll = NSScrollView(frame: NSRect(x: 20, y: 60, width: 560, height: 300))
+        scroll.hasVerticalScroller = true; scroll.borderType = .noBorder
+        for (index, title) in ["日期", "工作次数", "工作时间", "休息次数", "休息时间"].enumerated() {
+            let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("\(index)"))
+            column.title = title; column.width = [110, 80, 130, 80, 130][index]; table.addTableColumn(column)
+        }
+        table.frame = scroll.bounds; table.autoresizingMask = [.width]
+        table.columnAutoresizingStyle = .noColumnAutoresizing
+        table.rowHeight = 28; table.usesAlternatingRowBackgroundColors = true
+        table.dataSource = self; table.delegate = self; scroll.documentView = table; view.addSubview(scroll); table.reloadData()
+        let close = NSButton(title: "完成", target: self, action: #selector(done)); close.bezelStyle = .rounded
+        close.keyEquivalent = "\r"; close.frame = NSRect(x: 500, y: 16, width: 80, height: 32); view.addSubview(close)
+    }
+    func numberOfRows(in tableView: NSTableView) -> Int { days.count }
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        let day = days[row], summary = day.summary
+        let values = [StatsFormat.date(day.date, format: "yyyy/M/d"), "\(summary.workCount)", StatsFormat.duration(summary.workSeconds), "\(summary.restCount)", StatsFormat.duration(summary.restSeconds)]
+        let label = NSTextField(labelWithString: values[Int(tableColumn?.identifier.rawValue ?? "0") ?? 0])
+        label.font = .systemFont(ofSize: 12); label.isSelectable = true; return label
+    }
+    @objc private func done() { if let window = view.window { window.sheetParent?.endSheet(window) } }
 }
 
 private final class StatisticsDashboard: NSView {
     let store: UsageStore
     private let chart = StatisticsChart()
     private let heatmap = StatisticsHeatmap()
-    private let ranges = NSSegmentedControl(labels: UsagePeriod.allCases.map(\.title), trackingMode: .selectOne, target: nil, action: nil)
-    private let metrics = NSSegmentedControl(labels: ["时间", "次数"], trackingMode: .selectOne, target: nil, action: nil)
-    private let styles = NSSegmentedControl(labels: ["柱状图", "折线图"], trackingMode: .selectOne, target: nil, action: nil)
+    private let overview = StatisticsOverview()
+    let tabs = NSSegmentedControl(labels: ["概览", "趋势", "热图"], trackingMode: .selectOne, target: nil, action: nil)
+    let ranges = NSPopUpButton()
+    let metrics = NSSegmentedControl(labels: ["时间", "次数"], trackingMode: .selectOne, target: nil, action: nil)
+    let styles = NSSegmentedControl(labels: ["柱状图", "折线图"], trackingMode: .selectOne, target: nil, action: nil)
     private let titleLabel = NSTextField(labelWithString: "使用统计")
     private let sinceLabel = NSTextField(labelWithString: "")
     private let periodLabel = NSTextField(labelWithString: "")
-    private let heatLabel = NSTextField(labelWithString: "近一年使用热图")
-    private let note = NSTextField(wrappingLabelWithString: "")
-    private var cards: [NSBox] = []
-    private var values: [NSTextField] = []
+    private let note = NSTextField(labelWithString: "数据仅保存在此 Mac")
+    private let info = NSButton(title: "统计说明", target: nil, action: nil)
+    private let details = NSButton(title: "每日明细", target: nil, action: nil)
+    private let logo = NSImageView()
+    private var detailsController: StatisticsDetails?
     override var isFlipped: Bool { true }
     init(store: UsageStore) {
         self.store = store
-        super.init(frame: NSRect(x: 0, y: 0, width: 960, height: 824))
-        titleLabel.font = .systemFont(ofSize: 25, weight: .semibold)
-        sinceLabel.font = .systemFont(ofSize: 11); sinceLabel.textColor = .secondaryLabelColor
-        periodLabel.font = .systemFont(ofSize: 12); periodLabel.textColor = .secondaryLabelColor
-        heatLabel.font = .systemFont(ofSize: 16, weight: .semibold)
-        note.font = .systemFont(ofSize: 11); note.textColor = .secondaryLabelColor
-        for view in [titleLabel, sinceLabel, periodLabel, heatLabel, note, ranges, metrics, styles, chart, heatmap] { addSubview(view) }
-        for (index, text) in ["累计完成番茄钟", "累计工作时间", "累计休息次数", "累计休息时间"].enumerated() {
-            let box = NSBox(); box.boxType = .custom; box.borderWidth = 1
-            box.borderColor = NSColor.separatorColor.withAlphaComponent(0.35); box.fillColor = .controlBackgroundColor
-            box.cornerRadius = 10; box.contentViewMargins = .zero
-            let label = NSTextField(labelWithString: text); label.font = .systemFont(ofSize: 12); label.textColor = .secondaryLabelColor
-            let value = NSTextField(labelWithString: "0"); value.font = .systemFont(ofSize: 23, weight: .semibold)
-            value.textColor = index < 2 ? .systemBlue : .systemGreen
-            box.addSubview(label); box.addSubview(value)
-            label.frame = NSRect(x: 15, y: 54, width: 205, height: 18)
-            value.frame = NSRect(x: 15, y: 19, width: 210, height: 28)
-            cards.append(box); values.append(value); addSubview(box)
-        }
-        for control in [ranges, metrics, styles] {
+        super.init(frame: NSRect(x: 0, y: 0, width: 680, height: 570))
+        titleLabel.font = StatsStyle.rounded(22, weight: .medium)
+        for label in [sinceLabel, periodLabel, note] { label.font = .systemFont(ofSize: 11); label.textColor = StatsStyle.secondary }
+        periodLabel.font = .systemFont(ofSize: 12)
+        logo.image = NSImage(size: NSSize(width: 48, height: 48), flipped: false) { _ in MinutesLogo.draw(size: 48); return true }
+        logo.setAccessibilityLabel("Minutes2")
+        for control in [tabs, metrics, styles] {
+            control.selectedSegment = 0; control.segmentStyle = .rounded; control.font = .systemFont(ofSize: 13)
             control.target = self; control.action = #selector(selectionChanged)
-            control.selectedSegment = 0
         }
-        ranges.selectedSegment = UsagePeriod.week.rawValue
-        ranges.setAccessibilityLabel("统计周期"); metrics.setAccessibilityLabel("统计指标"); styles.setAccessibilityLabel("图表类型")
+        ranges.addItems(withTitles: UsagePeriod.allCases.map(\.title)); ranges.selectItem(at: UsagePeriod.week.rawValue)
+        ranges.target = self; ranges.action = #selector(selectionChanged)
+        tabs.setAccessibilityLabel("统计页面"); ranges.setAccessibilityLabel("统计周期")
+        metrics.setAccessibilityLabel("统计指标"); styles.setAccessibilityLabel("图表类型")
+        for (index, symbol) in ["circle.dotted", "chart.xyaxis.line", "square.grid.3x3"].enumerated() {
+            tabs.setImage(NSImage(systemSymbolName: symbol, accessibilityDescription: nil), forSegment: index)
+        }
+        for button in [info, details] { button.bezelStyle = .rounded; button.font = .systemFont(ofSize: 11); button.target = self }
+        info.action = #selector(showInfo); details.action = #selector(showDetails)
+        info.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: nil)
+        details.image = NSImage(systemSymbolName: "list.bullet", accessibilityDescription: nil)
+        info.imagePosition = .imageLeading; details.imagePosition = .imageLeading
+        for page in [overview, chart, heatmap] { page.setAccessibilityElement(true); page.setAccessibilityRole(.image) }
+        chart.toolTip = "悬停查看每日数据，或点按每日明细打开数据表"
+        heatmap.toolTip = "每格代表一天，深色表示更多专注；每日明细支持键盘和辅助功能"
+        for view in [logo, titleLabel, sinceLabel, tabs, ranges, metrics, styles, periodLabel, overview, chart, heatmap, note, info, details] { addSubview(view) }
         refresh()
     }
     required init?(coder: NSCoder) { fatalError() }
     override func layout() {
         super.layout()
-        let width = bounds.width
-        titleLabel.frame = NSRect(x: 24, y: 16, width: 200, height: 34)
-        sinceLabel.frame = NSRect(x: 24, y: 51, width: width - 48, height: 20)
-        let cardWidth = (width - 84) / 4
-        for (index, card) in cards.enumerated() {
-            card.frame = NSRect(x: 24 + CGFloat(index) * (cardWidth + 12), y: 82, width: cardWidth, height: 93)
-            for view in (card.contentView?.subviews ?? []) + card.subviews where view is NSTextField { view.frame.size.width = cardWidth - 30 }
+        let width = bounds.width, height = bounds.height
+        logo.frame = NSRect(x: 26, y: 36, width: 44, height: 44)
+        titleLabel.frame = NSRect(x: 84, y: 34, width: width - 112, height: 30)
+        sinceLabel.frame = NSRect(x: 84, y: 66, width: width - 112, height: 20)
+        tabs.frame = NSRect(x: 24, y: 104, width: width - 48, height: 32)
+        for index in 0..<3 { tabs.setWidth((width - 58) / 3, forSegment: index) }
+        overview.frame = NSRect(x: 24, y: 156, width: width - 48, height: height - 218)
+        ranges.frame = NSRect(x: 24, y: 156, width: 138, height: 30)
+        metrics.frame = NSRect(x: width - 316, y: 156, width: 120, height: 30)
+        styles.frame = NSRect(x: width - 180, y: 156, width: 156, height: 30)
+        periodLabel.frame = NSRect(x: 28, y: 202, width: width - 56, height: 22)
+        chart.frame = NSRect(x: 24, y: 236, width: width - 48, height: height - 298)
+        heatmap.frame = NSRect(x: 24, y: 198, width: width - 48, height: height - 260)
+        if tabs.selectedSegment == 2 {
+            metrics.frame = NSRect(x: width - 144, y: 156, width: 120, height: 30)
+            periodLabel.frame = NSRect(x: 28, y: 160, width: width - 192, height: 24)
         }
-        ranges.frame = NSRect(x: 24, y: 196, width: width - 354, height: 28)
-        metrics.frame = NSRect(x: width - 314, y: 196, width: 118, height: 28)
-        styles.frame = NSRect(x: width - 176, y: 196, width: 152, height: 28)
-        periodLabel.frame = NSRect(x: 24, y: 234, width: width - 48, height: 22)
-        chart.frame = NSRect(x: 24, y: 266, width: width - 48, height: 280)
-        heatLabel.frame = NSRect(x: 24, y: 565, width: width - 48, height: 24)
-        heatmap.frame = NSRect(x: 24, y: 599, width: width - 48, height: 170)
-        note.frame = NSRect(x: 24, y: 782, width: width - 48, height: 40)
+        note.frame = NSRect(x: 28, y: height - 38, width: width - 280, height: 20)
+        info.frame = NSRect(x: width - 134, y: height - 43, width: 110, height: 30)
+        details.frame = NSRect(x: width - 252, y: height - 43, width: 110, height: 30)
     }
-    override func draw(_ dirtyRect: NSRect) { NSColor.windowBackgroundColor.setFill(); bounds.fill() }
-    @objc private func selectionChanged() { refresh() }
+    override func draw(_ dirtyRect: NSRect) {
+        let opaque = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        NSColor.windowBackgroundColor.withAlphaComponent(opaque ? 1 : 0.86).setFill(); bounds.fill()
+        guard !opaque else { return }
+        let colors = [NSColor.systemTeal.withAlphaComponent(0.10), NSColor.systemOrange.withAlphaComponent(0.07), NSColor.clear]
+        NSGradient(colors: colors)?.draw(in: bounds, angle: 25)
+    }
+    @objc private func selectionChanged() {
+        refresh()
+        // Native controls keep focus; only the new page fades, without moving content.
+        let page: NSView = tabs.selectedSegment == 0 ? overview : tabs.selectedSegment == 1 ? chart : heatmap
+        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            page.alphaValue = 0.5
+            NSAnimationContext.runAnimationGroup { context in context.duration = 0.18; page.animator().alphaValue = 1 }
+        }
+    }
     func refresh(at now: Date = Date()) {
         let ledger = store.snapshot(at: now), total = UsageAggregation.total(ledger, at: now)
-        values[0].stringValue = "\(total.workCount) 次"
-        values[1].stringValue = StatsFormat.duration(total.workSeconds)
-        values[2].stringValue = "\(total.restCount) 次"
-        values[3].stringValue = StatsFormat.duration(total.restSeconds)
-        sinceLabel.stringValue = "从 \(StatsFormat.date(ledger.recordingSince, format: "yyyy年M月d日")) 开始记录 · 数据仅保存在此 Mac"
-        guard store.historyAvailable else {
-            values.forEach { $0.stringValue = "—" }
-            sinceLabel.stringValue = "统计数据暂不可读取，原文件未修改"
-            periodLabel.stringValue = "无法读取统计记录"
-            chart.days = []; heatmap.days = []
-            for control in [ranges, metrics, styles] { control.isEnabled = false }
-            note.stringValue = store.persistenceError ?? "统计记录暂不可用"
-            note.textColor = .systemRed; needsLayout = true; return
-        }
-        let period = UsagePeriod(rawValue: ranges.selectedSegment) ?? .week
-        let data = UsageAggregation.days(ledger, period: period, at: now)
-        chart.timeMode = metrics.selectedSegment == 0; chart.bars = styles.selectedSegment == 0; chart.days = data
-        heatmap.timeMode = chart.timeMode; heatmap.days = UsageAggregation.days(ledger, period: .year, at: now)
-        heatLabel.stringValue = "近一年使用热图 · \(chart.timeMode ? "工作时间" : "完成次数")"
+        let period = UsagePeriod(rawValue: ranges.indexOfSelectedItem) ?? .week
         let summary = UsageAggregation.summary(ledger, from: period.start(at: now, calendar: .current), to: now.addingTimeInterval(0.001))
-        periodLabel.stringValue = "\(period.title)  ·  工作 \(summary.workCount)次 / \(StatsFormat.duration(summary.workSeconds))  ·  休息 \(summary.restCount)次 / \(StatsFormat.duration(summary.restSeconds))"
-        note.stringValue = store.persistenceError ?? "工作次数按完成计算，休息次数按实际开始计算；暂停和预览不计入时长。时间按真实经过时长记录，重叠时间去重，工作优先。\n每根时间柱代表24小时；其他时间含未记录及当天尚未到达的时段。此前未记录的使用历史无法补回。"
-        note.textColor = store.persistenceError == nil ? .secondaryLabelColor : .systemRed
+        overview.total = total; overview.available = store.historyAvailable
+        overview.today = UsageAggregation.summary(ledger, from: Calendar.current.startOfDay(for: now), to: now.addingTimeInterval(0.001))
+        sinceLabel.stringValue = "Minutes2 · 从 \(StatsFormat.date(ledger.recordingSince, format: "yyyy/M/d")) 开始记录"
+        chart.timeMode = metrics.selectedSegment == 0; chart.bars = styles.selectedSegment == 0
+        chart.days = store.historyAvailable ? UsageAggregation.days(ledger, period: period, at: now) : []
+        heatmap.timeMode = chart.timeMode; heatmap.days = store.historyAvailable ? UsageAggregation.days(ledger, period: .year, at: now) : []
+        let tab = tabs.selectedSegment
+        overview.isHidden = tab != 0; chart.isHidden = tab != 1; heatmap.isHidden = tab != 2
+        ranges.isHidden = tab != 1; styles.isHidden = tab != 1; metrics.isHidden = tab == 0; periodLabel.isHidden = tab == 0
+        periodLabel.stringValue = tab == 2 ? "近一年 · \(chart.timeMode ? "工作时间" : "完成次数")" : "工作 \(summary.workCount)次 · \(StatsFormat.duration(summary.workSeconds))    休息 \(summary.restCount)次 · \(StatsFormat.duration(summary.restSeconds))"
+        note.stringValue = store.persistenceError == nil ? "数据仅保存在此 Mac" : "统计数据暂不可用 · 查看说明"
+        note.textColor = store.persistenceError == nil ? StatsStyle.secondary : .systemRed
+        if !store.historyAvailable { sinceLabel.stringValue = "统计记录暂不可读取，原文件未修改"; periodLabel.stringValue = "无法读取统计记录" }
+        ranges.isEnabled = store.historyAvailable; metrics.isEnabled = store.historyAvailable
+        styles.isEnabled = store.historyAvailable; details.isEnabled = store.historyAvailable
         needsLayout = true
+    }
+    @objc private func showInfo() {
+        guard let window else { return }
+        let alert = NSAlert(); alert.messageText = "统计说明"
+        alert.informativeText = store.persistenceError ?? "工作次数按完成计算，休息次数按实际开始计算。暂停和场景预览不计入时长，倍速按实际经过的时间记录。\n\n时间柱每根代表24小时，其他时间包含未记录与当天尚未到达的时段。多个番茄钟的重叠时长去重，工作优先。\n\n统计从此功能启用后开始记录，无法补回此前历史。数据仅保存在当前 Mac。"
+        alert.addButton(withTitle: "知道了"); alert.beginSheetModal(for: window)
+    }
+    @objc private func showDetails() {
+        guard let window else { return }
+        let controller = StatisticsDetails()
+        controller.days = tabs.selectedSegment != 1 ? heatmap.days.reversed() : chart.days.reversed()
+        let sheet = NSWindow(contentViewController: controller)
+        sheet.title = tabs.selectedSegment == 1 ? "\(ranges.titleOfSelectedItem ?? "") · 每日明细" : "近一年 · 每日明细"; detailsController = controller
+        window.beginSheet(sheet) { [weak self] _ in self?.detailsController = nil }
     }
 }
 
@@ -275,15 +398,16 @@ final class StatisticsWindowController: NSWindowController, NSWindowDelegate {
     private var refreshTimer: Timer?
     init(store: UsageStore) {
         dashboard = StatisticsDashboard(store: store)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 810),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 570),
+                              styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false)
         super.init(window: window)
-        window.title = "Minutes2 · 使用统计"; window.minSize = NSSize(width: 860, height: 620)
+        window.title = "Minutes2 · 使用统计"; window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false; window.acceptsMouseMovedEvents = true; window.delegate = self
-        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 960, height: 810))
-        scroll.hasVerticalScroller = true; scroll.autoresizingMask = [.width, .height]
-        dashboard.autoresizingMask = [.width]; scroll.documentView = dashboard
-        window.contentView = scroll; window.center()
+        window.isOpaque = false; window.backgroundColor = .clear
+        let glass = NSVisualEffectView(frame: dashboard.frame)
+        glass.material = .hudWindow; glass.blendingMode = .behindWindow; glass.state = .active
+        dashboard.autoresizingMask = [.width, .height]; glass.addSubview(dashboard)
+        window.contentView = glass; window.center()
         store.changed = { [weak self] in
             guard self?.window?.isVisible == true else { return }; self?.dashboard.refresh()
         }
