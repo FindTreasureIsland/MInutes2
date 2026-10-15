@@ -47,6 +47,7 @@ public struct TimerEngine {
     public static let speedOptions = [1, 2, 4, 8, 16]
     public private(set) var speedMultiplier: Int
     public private(set) var deadline: Date?
+    public private(set) var pausedForScreenLock = false
     private var pausedRemaining: TimeInterval = 0
 
     public init(minutes: Int = 25, repeats: Bool = false, speedMultiplier: Int = 1) {
@@ -62,6 +63,7 @@ public struct TimerEngine {
     }
     public mutating func select(_ minutes: Int) {
         guard phase == .setting || phase == .paused else { return }
+        pausedForScreenLock = false
         selectedMinutes = min(60, max(1, minutes))
         if phase == .paused { pausedRemaining = Double(selectedMinutes * 60) }
     }
@@ -90,6 +92,7 @@ public struct TimerEngine {
         min(1, max(0, remaining(at: now) / Double(selectedMinutes * 60)))
     }
     public mutating func toggle(at now: Date) {
+        pausedForScreenLock = false
         switch phase {
         case .setting:
             deadline = now.addingTimeInterval(Double(selectedMinutes * 60) / Double(speedMultiplier))
@@ -104,6 +107,17 @@ public struct TimerEngine {
         case .alarm: break
         }
     }
+    /// Only a running timer can become an automatically paused timer.
+    public mutating func pauseForScreenLock(at now: Date) {
+        guard phase == .running else { return }
+        toggle(at: now)
+        pausedForScreenLock = phase == .paused
+    }
+    @discardableResult public mutating func resumeAfterScreenUnlock(at now: Date) -> Bool {
+        guard pausedForScreenLock, phase == .paused else { return false }
+        toggle(at: now)
+        return true
+    }
     @discardableResult public mutating func tick(at now: Date) -> Bool {
         guard phase == .running, remaining(at: now) <= 0 else { return false }
         phase = .alarm
@@ -111,7 +125,7 @@ public struct TimerEngine {
         return true
     }
     public mutating func reset() {
-        phase = .setting; deadline = nil; pausedRemaining = 0
+        phase = .setting; deadline = nil; pausedRemaining = 0; pausedForScreenLock = false
     }
     public mutating func dismissAlarm(at now: Date) {
         guard phase == .alarm else { return }

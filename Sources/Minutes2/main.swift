@@ -1108,13 +1108,29 @@ final class TimerSession: NSObject, NSWindowDelegate, NSPopoverDelegate {
         }
         app?.sessionChanged(self)
     }
+    func pauseForScreenLock(at now: Date) {
+        guard !closed, engine.phase == .running else { return }
+        let deadline = engine.deadline
+        engine.pauseForScreenLock(at: now)
+        if engine.phase == .paused { app?.usage.pauseWork(id, at: now) }
+        else if engine.phase == .alarm {
+            app?.usage.finishWork(id, at: deadline ?? now); app?.enqueueAlarm(self)
+        }
+        audio.stop(); soundPopover.close(); dial.clearFocus()
+        app?.sessionChanged(self)
+    }
+    func resumeAfterScreenUnlock(at now: Date) {
+        guard !closed, engine.resumeAfterScreenUnlock(at: now), let deadline = engine.deadline else { return }
+        app?.usage.beginWork(id, at: now, deadline: deadline, continuing: true)
+        app?.sessionChanged(self)
+    }
     func resetTimer() {
         dial.closeMusicSelection()
         app?.usage.abandon(id, at: Date())
         engine.reset(); audio.stop(); app?.cancelAlarm(id); app?.sessionChanged(self)
     }
     func showWindow() {
-        guard !closed, app?.isPresentingAlarm == false else { return }
+        guard !closed, app?.isPresentingAlarm == false, app?.isScreenLocked == false else { return }
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil); window.makeFirstResponder(dial)
         app?.activateSession(self)
@@ -1174,6 +1190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var dockLastUpdated: TimeInterval = 0
     private let defaultDockIcon = NSImage(named: "AppIcon")
     private var terminating = false
+    private(set) var isScreenLocked = false
     private var restMinutes: Int = {
         let saved = UserDefaults.standard.integer(forKey: "restMinutes")
         return RestCountdown.minuteOptions.contains(saved) ? saved : 5
@@ -1195,6 +1212,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         ticker = Timer(timeInterval: 0.20, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(ticker!, forMode: .common)
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(wokeUp), name: NSWorkspace.didWakeNotification, object: nil)
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(screenDidLock), name: Notification.Name("com.apple.screenIsLocked"), object: nil, suspensionBehavior: .deliverImmediately)
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(screenDidUnlock), name: Notification.Name("com.apple.screenIsUnlocked"), object: nil, suspensionBehavior: .deliverImmediately)
         clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
             for session in self?.sessions ?? [] {
                 if event.window !== session.window || !session.dial.containsDialPoint(session.dial.convert(event.locationInWindow, from: nil)) {
@@ -1228,7 +1247,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         active?.showWindow(); refresh(); syncActivity()
     }
     func activateSession(_ session: TimerSession) { guard !session.closed else { return }; lastActive = session; refresh() }
-    func sessionChanged(_ session: TimerSession) { session.dial.refresh(); syncActivity(); refresh() }
+    func sessionChanged(_ session: TimerSession) {
+        if isScreenLocked, session.engine.phase == .running { session.pauseForScreenLock(at: Date()); return }
+        session.dial.refresh(); syncActivity(); refresh()
+    }
     private func menuItem(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; return item
     }
@@ -1417,7 +1439,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
     func cancelAlarm(_ id: UUID) { if alarms.remove(id) { alarm.dismiss() } }
     private func presentNextAlarm() {
-        guard !terminating, let request = alarms.next() else { return }
+        guard !terminating, !isScreenLocked, let request = alarms.next() else { return }
         guard let session = sessions.first(where: { $0.id == request.timerID }) else {
             alarms.dismiss(); presentNextAlarm(); return
         }
@@ -1440,6 +1462,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                         usage.beginWork(session.id, at: now, deadline: deadline)
                     }
                 }
+                if isScreenLocked { session.pauseForScreenLock(at: now) }
                 session.showWindow(); session.dial.refresh()
             }
         }
@@ -1460,6 +1483,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         presentNextAlarm()
         usage.checkpoint(at: now)
         if ended { refresh(); syncActivity() } else { updateStatus() }
+    }
+    @objc private func screenDidLock() {
+        guard Thread.isMainThread else { DispatchQueue.main.async { [weak self] in self?.screenDidLock() }; return }
+        guard !isScreenLocked, !terminating else { return }
+        isScreenLocked = true
+        let now = Date()
+        sessions.forEach { $0.pauseForScreenLock(at: now) }
+        usage.checkpoint(at: now, force: true)
+        syncActivity(); refresh()
+    }
+    @objc private func screenDidUnlock() {
+        guard Thread.isMainThread else { DispatchQueue.main.async { [weak self] in self?.screenDidUnlock() }; return }
+        guard isScreenLocked, !terminating else { return }
+        isScreenLocked = false
+        let now = Date()
+        sessions.forEach { $0.resumeAfterScreenUnlock(at: now) }
+        usage.checkpoint(at: now, force: true)
+        tick(); syncActivity(); refresh()
     }
     @objc private func wokeUp() { tick() }
     private func updateStatus() {
@@ -1498,7 +1539,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private func endActivity() { if let activity { ProcessInfo.processInfo.endActivity(activity) }; activity = nil }
     @objc private func showUsage() {
         let alert = NSAlert(); alert.messageText = "Minutes2 使用说明"
-        alert.informativeText = "第一次单击圆盘显示阴影，再次单击开始、暂停或继续。点击其他地方取消阴影。长按圆盘约 0.35 秒后拖动可移动番茄钟。暂停后可拖动时间圆点调整剩余分钟。\n\n计时器：⌘N 新建独立番茄钟，⌘W 关闭当前番茄钟，空格开始或暂停。重复计时开启后，休息倒计时结束后会自动开始下一轮。预设时长只在设时或暂停时可用。\n\n计时器菜单可选择无、气泡、小黑猫或小黑猫2到时场景，并独立开关休息倒计时。视图菜单可预览当前场景。双击或使用计时器菜单中的“结束休息提醒”结束；重复模式会自动开始下一轮。多个番茄钟到时会依次提醒。"
+        alert.informativeText = "第一次单击圆盘显示阴影，再次单击开始、暂停或继续。点击其他地方取消阴影。长按圆盘约 0.35 秒后拖动可移动番茄钟。暂停后可拖动时间圆点调整剩余分钟。锁屏自动暂停，解锁自动继续；手动暂停的番茄钟保持暂停。\n\n计时器：⌘N 新建独立番茄钟，⌘W 关闭当前番茄钟，空格开始或暂停。重复计时开启后，休息倒计时结束后会自动开始下一轮。预设时长只在设时或暂停时可用。\n\n计时器菜单可选择无、气泡、小黑猫或小黑猫2到时场景，并独立开关休息倒计时。视图菜单可预览当前场景。双击或使用计时器菜单中的“结束休息提醒”结束；重复模式会自动开始下一轮。多个番茄钟到时会依次提醒。"
         alert.addButton(withTitle: "知道了"); alert.runModal()
     }
     @objc private func about() { aboutWindow.present() }
@@ -1517,6 +1558,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         sessions.forEach { $0.window.saveFrame(usingName: $0.frameName); $0.soundPopover.close(); $0.audio.stop() }
         active?.savePosition()
         alarm.dismiss(); endActivity(); NSWorkspace.shared.notificationCenter.removeObserver(self)
+        DistributedNotificationCenter.default().removeObserver(self)
     }
 }
 

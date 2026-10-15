@@ -179,3 +179,53 @@ final class TimerEngineTests: XCTestCase {
         }
     }
 }
+
+final class ScreenLockTimerTests: XCTestCase {
+    let start = Date(timeIntervalSince1970: 1000)
+    func testLockFreezesRemainingAndUnlockResumesAtCurrentSpeed() {
+        var timer = TimerEngine(minutes: 25, speedMultiplier: 4)
+        timer.toggle(at: start)
+        timer.pauseForScreenLock(at: start.addingTimeInterval(10))
+        XCTAssertTrue(timer.pausedForScreenLock)
+        XCTAssertEqual(timer.remaining(at: start.addingTimeInterval(1000)), 1460)
+        XCTAssertTrue(timer.resumeAfterScreenUnlock(at: start.addingTimeInterval(1000)))
+        XCTAssertEqual(timer.deadline, start.addingTimeInterval(1365))
+        XCTAssertFalse(timer.pausedForScreenLock)
+    }
+    func testManualPauseIsNeverAutomaticallyResumed() {
+        var timer = TimerEngine(minutes: 25)
+        timer.toggle(at: start); timer.toggle(at: start.addingTimeInterval(10))
+        timer.pauseForScreenLock(at: start.addingTimeInterval(20))
+        XCTAssertFalse(timer.pausedForScreenLock)
+        XCTAssertFalse(timer.resumeAfterScreenUnlock(at: start.addingTimeInterval(100)))
+        XCTAssertEqual(timer.phase, .paused)
+    }
+    func testDuplicateLockAndUnlockDoNotToggleAgain() {
+        var timer = TimerEngine(minutes: 1)
+        timer.toggle(at: start)
+        timer.pauseForScreenLock(at: start.addingTimeInterval(10))
+        timer.pauseForScreenLock(at: start.addingTimeInterval(20))
+        XCTAssertEqual(timer.remaining(at: start), 50)
+        XCTAssertTrue(timer.resumeAfterScreenUnlock(at: start.addingTimeInterval(100)))
+        XCTAssertFalse(timer.resumeAfterScreenUnlock(at: start.addingTimeInterval(110)))
+        XCTAssertEqual(timer.deadline, start.addingTimeInterval(150))
+    }
+    func testResetAndManualAdjustmentCancelAutomaticResume() {
+        var timer = TimerEngine(minutes: 1)
+        timer.toggle(at: start); timer.pauseForScreenLock(at: start.addingTimeInterval(10))
+        timer.select(3)
+        XCTAssertFalse(timer.resumeAfterScreenUnlock(at: start.addingTimeInterval(100)))
+        timer.toggle(at: start.addingTimeInterval(110)); timer.pauseForScreenLock(at: start.addingTimeInterval(120))
+        timer.reset()
+        XCTAssertFalse(timer.resumeAfterScreenUnlock(at: start.addingTimeInterval(200)))
+        XCTAssertEqual(timer.phase, .setting)
+    }
+    func testExpiredAndUnstartedTimersAreNotMarkedForResume() {
+        var timer = TimerEngine(minutes: 1)
+        timer.pauseForScreenLock(at: start)
+        XCTAssertEqual(timer.phase, .setting)
+        timer.toggle(at: start); timer.pauseForScreenLock(at: start.addingTimeInterval(61))
+        XCTAssertEqual(timer.phase, .alarm)
+        XCTAssertFalse(timer.resumeAfterScreenUnlock(at: start.addingTimeInterval(100)))
+    }
+}

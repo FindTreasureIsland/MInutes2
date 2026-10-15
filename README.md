@@ -162,7 +162,7 @@ Package.swift        Swift Package 配置
 
 `scripts/make-bubble-pop.py` 生成水泡音效；`scripts/make-icon.swift` 与 `Sources/Minutes2/MinutesLogo.swift` 共用矢量 Logo 绘制代码。可编辑的 Logo 位于 `Resources/Minutes2Logo.svg`。
 
-计时基于真实截止时间，系统唤醒后会检查是否到时；运行及休息期间申请防止空闲自动休眠。应用退出后不恢复之前的计时会话。
+计时基于真实截止时间；锁屏时自动暂停正在运行的番茄钟，解锁后按原剩余时间和倍速继续。手动暂停的番茄钟不会自动恢复，锁屏暂停期间不计入工作时间。运行及休息期间申请防止空闲自动休眠。应用退出后不恢复之前的计时会话。
 
 原版应用目录 `Minutes_x86/`、构建产物 `build/`、缓存 `.build/` 和个人 Xcode 配置均由 `.gitignore` 排除。
 
