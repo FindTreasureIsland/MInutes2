@@ -1,3 +1,4 @@
+import CoreGraphics
 import XCTest
 @testable import MinutesCore
 
@@ -71,5 +72,33 @@ final class CatPeekPlacementTests: XCTestCase {
         XCTAssertEqual(appearance.scene.title, "小黑猫2")
         XCTAssertEqual(appearance.dismissalSound, "CatMeow")
         XCTAssertTrue(appearance.hasVisibleOverlay)
+    }
+}
+
+final class MikuSceneTests: XCTestCase {
+    private let body = CGRect(x: 0, y: 0.018, width: 1, height: 0.78)
+    func testMikuPreferenceAndSilentDismissal() {
+        let appearance = ReminderAppearance(scene: "hatsuneMiku", showsCountdown: false)
+        XCTAssertEqual(appearance.scene, .hatsuneMiku)
+        XCTAssertEqual(appearance.scene.title, "初音未来")
+        XCTAssertTrue(appearance.hasVisibleOverlay)
+        XCTAssertNil(appearance.dismissalSound)
+    }
+    func testFallsFromTopAlongCenterAndLandsAboveClock() {
+        for screen in [CGSize(width: 1470, height: 956), CGSize(width: 1920, height: 1080), CGSize(width: 3840, height: 2160), CGSize(width: 600, height: 400)] {
+            let placement = MikuLandingPlacement(screen: screen, showsCountdown: true, visibleRect: body)
+            XCTAssertEqual(placement.visibleFrame.midX, screen.width / 2, accuracy: 0.001)
+            XCTAssertEqual(placement.hiddenPosition.x, placement.position.x)
+            XCTAssertTrue(placement.hiddenPosition.y - placement.size.height / 2 > screen.height)
+            XCTAssertTrue(placement.visibleFrame.minY > screen.height / 2 + ReminderGeometry.countdownHeight(in: screen) / 2)
+            XCTAssertTrue(placement.visibleFrame.maxY < screen.height)
+            XCTAssertTrue(placement.visibleFrame.minX >= 0 && placement.visibleFrame.maxX <= screen.width)
+        }
+    }
+    func testWithoutClockVisualBodyIsCentered() {
+        let screen = CGSize(width: 1920, height: 1080)
+        let placement = MikuLandingPlacement(screen: screen, showsCountdown: false, visibleRect: body)
+        XCTAssertEqual(placement.visibleFrame.midX, screen.width / 2, accuracy: 0.001)
+        XCTAssertEqual(placement.visibleFrame.midY, screen.height / 2, accuracy: 0.001)
     }
 }

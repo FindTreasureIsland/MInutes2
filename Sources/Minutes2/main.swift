@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import UniformTypeIdentifiers
 import QuartzCore
+import ImageIO
 #if canImport(MinutesCore)
 import MinutesCore
 #endif
@@ -640,7 +641,7 @@ final class RestDigitsView: NSView {
     override var isFlipped: Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func draw(_ dirtyRect: NSRect) {
-        let height = min(160, min(bounds.width / 5, bounds.height / 4))
+        let height = ReminderGeometry.countdownHeight(in: bounds.size)
         NSGraphicsContext.saveGraphicsState()
         let shadow = NSShadow(); shadow.shadowColor = NSColor.black.withAlphaComponent(0.55)
         shadow.shadowBlurRadius = 12; shadow.shadowOffset = .zero; shadow.set()
@@ -722,9 +723,55 @@ private enum BubbleAppearance {
     }
 }
 
+private struct MikuAnimation {
+    let frames: [CGImage]
+    let durations: [Double]
+    let visibleRect: CGRect
+    static let bundled: MikuAnimation? = {
+        guard let url = Bundle.main.url(forResource: "HatsuneMiku", withExtension: "gif") else { return nil }
+        return load(url)
+    }()
+    static func load(_ url: URL) -> MikuAnimation? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        var frames: [CGImage] = [], durations: [Double] = []
+        var union = CGRect.null
+        for index in 0..<CGImageSourceGetCount(source) {
+            guard let frame = CGImageSourceCreateImageAtIndex(source, index, nil) else { return nil }
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [String: Any]
+            let gif = properties?[kCGImagePropertyGIFDictionary as String] as? [String: Any]
+            let delay = gif?[kCGImagePropertyGIFUnclampedDelayTime as String] as? Double
+                ?? gif?[kCGImagePropertyGIFDelayTime as String] as? Double ?? 0.1
+            frames.append(frame); durations.append(max(0.02, delay))
+            // Find the artwork's union bounds; transparent canvas margins must
+            // not push the feet into the clock or offset the visual centering.
+            let width = frame.width, height = frame.height
+            var pixels = [UInt8](repeating: 0, count: width * height * 4)
+            pixels.withUnsafeMutableBytes { bytes in
+                guard let context = CGContext(data: bytes.baseAddress, width: width, height: height,
+                    bitsPerComponent: 8, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+                context.draw(frame, in: CGRect(x: 0, y: 0, width: width, height: height))
+                var minX = width, minY = height, maxX = 0, maxY = 0
+                for y in 0..<height {
+                    for x in 0..<width where bytes[(y * width + x) * 4 + 3] > 127 {
+                        minX = min(minX, x); minY = min(minY, y); maxX = max(maxX, x + 1); maxY = max(maxY, y + 1)
+                    }
+                }
+                if maxX > minX && maxY > minY {
+                    union = union.union(CGRect(x: Double(minX) / Double(width), y: Double(height - maxY) / Double(height),
+                        width: Double(maxX - minX) / Double(width), height: Double(maxY - minY) / Double(height)))
+                }
+            }
+        }
+        guard !frames.isEmpty else { return nil }
+        return MikuAnimation(frames: frames, durations: durations, visibleRect: union.isNull ? CGRect(x: 0, y: 0, width: 1, height: 1) : union)
+    }
+}
+
 final class BallsView: NSView {
     var doubleClicked: (() -> Void)?
     var catClicked: (() -> Void)?
+    private var mikuLayer: CALayer?
     private var peekingCats: [(layer: CALayer, hidden: CGPoint)] = []
     private lazy var cat2Image: CGImage? = {
         guard let url = Bundle.main.url(forResource: "BlackCat2", withExtension: "png"),
@@ -771,15 +818,31 @@ final class BallsView: NSView {
         restDigits.frame = bounds; restDigits.autoresizingMask = [.width, .height]
         restDigits.isHidden = !sceneAppearance.showsCountdown
         addSubview(restDigits)
-        if sceneAppearance.scene != .none {
+        if sceneAppearance.scene == .hatsuneMiku {
+            addMiku()
+        } else if sceneAppearance.scene != .none {
             addBall()
             clock = Timer(timeInterval: sceneAppearance.scene == .blackCat2 ? 1.2 : 0.45, repeats: true) { [weak self] _ in self?.addBall() }
             RunLoop.main.add(clock!, forMode: .common)
         }
     }
     required init?(coder: NSCoder) { fatalError() }
-    func stop() { clock?.invalidate(); clock = nil }
+    func stop() { clock?.invalidate(); clock = nil; mikuLayer?.removeAllAnimations() }
     func burst() {
+        if sceneAppearance.scene == .hatsuneMiku {
+            let current = mikuLayer?.presentation()?.position ?? mikuLayer?.position
+            let contents = mikuLayer?.presentation()?.contents ?? mikuLayer?.contents
+            stop()
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            if let current { mikuLayer?.position = current }
+            mikuLayer?.contents = contents
+            restDigits.alphaValue = 0; mikuLayer?.opacity = 0
+            CATransaction.commit()
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = 1; fade.toValue = 0; fade.duration = 0.2
+            mikuLayer?.add(fade, forKey: "dismiss")
+            return
+        }
         stop()
         guard let layer else { return }
         CATransaction.begin(); CATransaction.setDisableActions(true)
@@ -839,6 +902,36 @@ final class BallsView: NSView {
         }
         CATransaction.commit()
     }
+    private func addMiku() {
+        guard mikuLayer == nil, let layer, let animation = MikuAnimation.bundled else { return }
+        let placement = MikuLandingPlacement(screen: bounds.size, showsCountdown: sceneAppearance.showsCountdown,
+                                             visibleRect: animation.visibleRect)
+        let character = CALayer(); character.name = "HatsuneMiku"; character.bounds = CGRect(origin: .zero, size: placement.size)
+        character.contents = animation.frames[0]; character.contentsGravity = .resizeAspect
+        character.contentsScale = window?.backingScaleFactor ?? 2; character.position = placement.position
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        layer.insertSublayer(character, at: 0); CATransaction.commit()
+        mikuLayer = character
+        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            let dance = CAKeyframeAnimation(keyPath: "contents")
+            dance.values = animation.frames + [animation.frames[0]]
+            let duration = animation.durations.reduce(0, +)
+            var elapsed = 0.0
+            dance.keyTimes = animation.durations.map { delay in
+                defer { elapsed += delay }; return NSNumber(value: elapsed / duration)
+            } + [1]
+            dance.calculationMode = .discrete; dance.duration = duration; dance.repeatCount = .infinity
+            character.add(dance, forKey: "dance")
+            let fall = CABasicAnimation(keyPath: "position.y")
+            fall.fromValue = placement.hiddenPosition.y; fall.toValue = placement.position.y
+            fall.duration = 1.15; fall.timingFunction = .init(name: .easeOut)
+            character.add(fall, forKey: "arrival")
+        } else {
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = 0; fade.toValue = 1; fade.duration = 0.2
+            character.add(fade, forKey: "arrival")
+        }
+    }
     private func addPeekingCat() {
         guard let layer, let image = cat2Image else { return }
         let scale = max(0.5, min(bounds.width / 1470, bounds.height / 956))
@@ -863,6 +956,7 @@ final class BallsView: NSView {
         cat.add(peek, forKey: "peek")
     }
     private func addBall() {
+        if sceneAppearance.scene == .hatsuneMiku { return }
         if sceneAppearance.scene == .blackCat2 { addPeekingCat(); return }
 
         guard sceneAppearance.scene != .none, let layer else { return }
@@ -918,22 +1012,24 @@ final class AlarmController {
     private var clickSound: AVAudioPlayer?
     private var burstCompletion: Timer?
     private var appearance = ReminderAppearance()
-    func show(restMinutes: Int, appearance: ReminderAppearance, at now: Date = Date()) {
+    func show(restMinutes: Int, appearance: ReminderAppearance, at now: Date = Date(), preferredScreen: NSScreen? = nil) {
         self.appearance = appearance
         countdown = RestCountdown(minutes: restMinutes, at: now)
-        for screen in NSScreen.screens {
-            let window = ReminderWindow(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        let screens = appearance.scene == .hatsuneMiku
+            ? [preferredScreen ?? NSScreen.main ?? NSScreen.screens.first].compactMap { $0 } : NSScreen.screens
+        for screenFrame in screens.map(\.frame) {
+            let window = ReminderWindow(contentRect: screenFrame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             window.level = .screenSaver
             window.backgroundColor = .clear; window.isOpaque = false; window.hasShadow = false
             window.ignoresMouseEvents = !appearance.hasVisibleOverlay
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
             window.hidesOnDeactivate = false
             window.isReleasedWhenClosed = false
-            let view = BallsView(frame: NSRect(origin: .zero, size: screen.frame.size), appearance: appearance)
+            let view = BallsView(frame: NSRect(origin: .zero, size: screenFrame.size), appearance: appearance)
             view.doubleClicked = { [weak self] in self?.burstAndDismiss() }
             view.catClicked = { [weak self] in self?.playCatClick() }
             view.displayRest(seconds: countdown!.remainingSeconds(at: Date()))
-            window.contentView = view; window.setFrame(screen.frame, display: true)
+            window.contentView = view; window.setFrame(screenFrame, display: true)
             window.orderFrontRegardless()
             windows.append(window); views.append(view)
         }
@@ -964,7 +1060,7 @@ final class AlarmController {
             burstSound?.volume = 0.4; burstSound?.play()
         }
         views.forEach { $0.burst() }
-        let animationEndsAt = Date().addingTimeInterval(0.7)
+        let animationEndsAt = Date().addingTimeInterval(appearance.scene == .hatsuneMiku ? 0.22 : 0.7)
         burstCompletion = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] _ in
             guard let self, Date() >= animationEndsAt, self.burstSound?.isPlaying != true else { return }
             // Stop reminder music only after the scene-specific closing sound finishes.
@@ -1445,10 +1541,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard let session = sessions.first(where: { $0.id == request.timerID }) else {
             alarms.dismiss(); presentNextAlarm(); return
         }
+        let center = NSPoint(x: session.window.frame.midX, y: session.window.frame.midY)
+        let reminderScreen = session.window.screen ?? NSScreen.screens.first { $0.frame.contains(center) } ?? NSScreen.main
         session.showingAlarm = true; session.soundPopover.close(); session.audio.stop(); session.window.orderOut(nil)
         let now = Date()
         if !request.preview { usage.beginRest(session.id, at: now, deadline: now.addingTimeInterval(Double(restMinutes * 60))) }
-        alarm.show(restMinutes: restMinutes, appearance: ReminderAppearance(scene: reminderScene.rawValue, showsCountdown: showsRestCountdown), at: now)
+        alarm.show(restMinutes: restMinutes, appearance: ReminderAppearance(scene: reminderScene.rawValue, showsCountdown: showsRestCountdown), at: now, preferredScreen: reminderScreen)
         session.audio.play(loop: true)
     }
     private func finishAlarm(completed: Bool) {
@@ -1541,7 +1639,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private func endActivity() { if let activity { ProcessInfo.processInfo.endActivity(activity) }; activity = nil }
     @objc private func showUsage() {
         let alert = NSAlert(); alert.messageText = "Minutes2 使用说明"
-        alert.informativeText = "第一次单击圆盘显示阴影，再次单击开始、暂停或继续。点击其他地方取消阴影。长按圆盘约 0.35 秒后拖动可移动番茄钟。暂停后可拖动时间圆点调整剩余分钟。锁屏自动暂停，解锁自动继续；手动暂停的番茄钟保持暂停。\n\n计时器：⌘N 新建独立番茄钟，⌘W 关闭当前番茄钟，空格开始或暂停。重复计时开启后，休息倒计时结束后会自动开始下一轮。预设时长只在设时或暂停时可用。\n\n计时器菜单可选择无、气泡、小黑猫或小黑猫2到时场景，并独立开关休息倒计时。视图菜单可预览当前场景。双击或使用计时器菜单中的“结束休息提醒”结束；重复模式会自动开始下一轮。多个番茄钟到时会依次提醒。"
+        alert.informativeText = "第一次单击圆盘显示阴影，再次单击开始、暂停或继续。点击其他地方取消阴影。长按圆盘约 0.35 秒后拖动可移动番茄钟。暂停后可拖动时间圆点调整剩余分钟。锁屏自动暂停，解锁自动继续；手动暂停的番茄钟保持暂停。\n\n计时器：⌘N 新建独立番茄钟，⌘W 关闭当前番茄钟，空格开始或暂停。重复计时开启后，休息倒计时结束后会自动开始下一轮。预设时长只在设时或暂停时可用。\n\n计时器菜单可选择无、气泡、小黑猫、小黑猫2或初音未来到时场景，并独立开关休息倒计时。视图菜单可预览当前场景。双击或使用计时器菜单中的“结束休息提醒”结束；重复模式会自动开始下一轮。多个番茄钟到时会依次提醒。"
         alert.addButton(withTitle: "知道了"); alert.runModal()
     }
     @objc private func about() { aboutWindow.present() }
