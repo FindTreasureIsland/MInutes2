@@ -30,8 +30,9 @@ private enum StatsFormat {
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = format; return formatter.string(from: date)
     }
+    static func hourRange(_ hour: Int) -> String { String(format: "%02d:00–%02d:00", hour, hour + 1) }
     static func detail(_ day: UsageDay) -> String {
-        "\(date(day.date, format: "yyyy年M月d日"))  ·  工作 \(duration(day.summary.workSeconds))（\(day.summary.workCount)次）  ·  休息 \(duration(day.summary.restSeconds))（\(day.summary.restCount)次）"
+        "\(day.hour.map(hourRange) ?? date(day.date, format: "yyyy年M月d日"))  ·  工作 \(duration(day.summary.workSeconds))（\(day.summary.workCount)次）  ·  休息 \(duration(day.summary.restSeconds))（\(day.summary.restCount)次）"
     }
     static func draw(_ text: String, in rect: NSRect, size: CGFloat = 11, color: NSColor = StatsStyle.secondary,
                      weight: NSFont.Weight = .regular, alignment: NSTextAlignment = .left) {
@@ -45,6 +46,7 @@ private final class StatisticsChart: NSView {
     var days: [UsageDay] = [] { didSet { selected = nil; needsDisplay = true } }
     var timeMode = true { didSet { needsDisplay = true } }
     var bars = true { didSet { needsDisplay = true } }
+    var hourly = false { didSet { needsDisplay = true } }
     private var selected: Int?
     override var isFlipped: Bool { true }
     private var plot: NSRect { NSRect(x: 56, y: 28, width: max(1, bounds.width - 76), height: max(1, bounds.height - 75)) }
@@ -77,7 +79,7 @@ private final class StatisticsChart: NSView {
             return Double(work ? day.summary.workCount : day.summary.restCount)
         }
         let largest = days.map { max(value($0, work: true), value($0, work: false)) }.max() ?? 0
-        let maximum: Double = timeMode && bars ? 24 : timeMode ? max(0.25, ceil(largest * 1.1 * 4) / 4) : max(4, ceil(largest / 4) * 4)
+        let maximum: Double = timeMode && bars ? (hourly ? 1 : 24) : timeMode ? max(0.25, ceil(largest * 1.1 * 4) / 4) : max(4, ceil(largest / 4) * 4)
         func y(_ amount: Double) -> CGFloat { rect.maxY - CGFloat(amount / maximum) * rect.height }
         for tick in 0...4 {
             let value = maximum * Double(tick) / 4, at = y(value)
@@ -97,8 +99,8 @@ private final class StatisticsChart: NSView {
                 if timeMode {
                     var accumulated: Double = 0
                     for (seconds, color) in [(day.summary.workSeconds, workColor), (day.summary.restSeconds, restColor), (day.otherSeconds, otherColor)] {
-                        // Every daily column has a 24-hour height; DST days are normalized.
-                        let hours = seconds / day.daySeconds * 24
+                        // Hourly columns represent 60 minutes; daily columns represent 24 hours.
+                        let hours = day.daySeconds > 0 ? seconds / day.daySeconds * (hourly ? 1 : 24) : 0
                         let top = y(accumulated + hours), bottom = y(accumulated)
                         color.setFill(); NSBezierPath(rect: NSRect(x: center - width / 2, y: top, width: width, height: max(0, bottom - top))).fill()
                         accumulated += hours
@@ -126,16 +128,18 @@ private final class StatisticsChart: NSView {
             }
         }
         let tickCount = min(7, max(1, days.count - 1))
+        let indices = hourly ? Array(stride(from: 0, to: days.count, by: 3)) + [days.count - 1]
+            : (0...tickCount).map { Int((Double($0) / Double(tickCount) * Double(days.count - 1)).rounded()) }
         var drawn: Set<Int> = []
-        for tick in 0...tickCount {
-            let index = Int((Double(tick) / Double(tickCount) * Double(days.count - 1)).rounded())
+        for index in indices {
             guard drawn.insert(index).inserted else { continue }
             let x = rect.minX + (CGFloat(index) + 0.5) * stepWidth
-            StatsFormat.draw(StatsFormat.date(days[index].date), in: NSRect(x: x - 24, y: rect.maxY + 3, width: 48, height: 18), alignment: .center)
+            let label = days[index].hour.map { String(format: "%02d时", $0) } ?? StatsFormat.date(days[index].date)
+            StatsFormat.draw(label, in: NSRect(x: x - 24, y: rect.maxY + 3, width: 48, height: 18), alignment: .center)
         }
-        let detail = selected.map { StatsFormat.detail(days[$0]) } ?? "悬停查看每日数据 · 也可打开明细"
+        let detail = selected.map { StatsFormat.detail(days[$0]) } ?? (hourly ? "今天 00:00–24:00 · 悬停查看每小时数据" : "悬停查看每日数据 · 也可打开明细")
         StatsFormat.draw(detail, in: NSRect(x: 20, y: bounds.height - 22, width: bounds.width - 40, height: 20), size: 11)
-        setAccessibilityLabel("\(timeMode ? "时间" : "次数")\(bars ? "柱状图" : "折线图")，工作青色，休息橙色，\(days.count)天")
+        setAccessibilityLabel("\(timeMode ? "时间" : "次数")\(bars ? "柱状图" : "折线图")，工作青色，休息橙色，\(days.count)\(hourly ? "小时" : "天")")
     }
 }
 
@@ -225,13 +229,14 @@ private final class StatisticsOverview: NSView {
 }
 
 private final class StatisticsDetails: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
+    var hourly = false
     var days: [UsageDay] = []
     private let table = NSTableView()
     override func loadView() {
         view = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 260))
         let scroll = NSScrollView(frame: NSRect(x: 20, y: 60, width: 560, height: 180))
         scroll.hasVerticalScroller = true; scroll.borderType = .noBorder
-        for (index, title) in ["日期", "工作次数", "工作时间", "休息次数", "休息时间"].enumerated() {
+        for (index, title) in [hourly ? "时段" : "日期", "工作次数", "工作时间", "休息次数", "休息时间"].enumerated() {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("\(index)"))
             column.title = title; column.width = [110, 80, 130, 80, 130][index]; table.addTableColumn(column)
         }
@@ -245,7 +250,7 @@ private final class StatisticsDetails: NSViewController, NSTableViewDataSource, 
     func numberOfRows(in tableView: NSTableView) -> Int { days.count }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let day = days[row], summary = day.summary
-        let values = [StatsFormat.date(day.date, format: "yyyy/M/d"), "\(summary.workCount)", StatsFormat.duration(summary.workSeconds), "\(summary.restCount)", StatsFormat.duration(summary.restSeconds)]
+        let values = [day.hour.map(StatsFormat.hourRange) ?? StatsFormat.date(day.date, format: "yyyy/M/d"), "\(summary.workCount)", StatsFormat.duration(summary.workSeconds), "\(summary.restCount)", StatsFormat.duration(summary.restSeconds)]
         let label = NSTextField(labelWithString: values[Int(tableColumn?.identifier.rawValue ?? "0") ?? 0])
         label.font = .systemFont(ofSize: 12); label.isSelectable = true; return label
     }
@@ -375,9 +380,13 @@ private final class StatisticsDashboard: NSView {
         overview.today = UsageAggregation.summary(ledger, from: Calendar.current.startOfDay(for: now), to: now.addingTimeInterval(0.001))
         sinceLabel.stringValue = "Minutes2 · 从 \(StatsFormat.date(ledger.recordingSince, format: "yyyy/M/d")) 开始记录"
         chart.timeMode = metrics.selectedSegment == 0; chart.bars = styles.selectedSegment == 0
-        chart.days = store.historyAvailable ? UsageAggregation.days(ledger, period: period, at: now) : []
+        chart.hourly = period == .today
+        chart.days = store.historyAvailable ? (chart.hourly ? UsageAggregation.hours(ledger, at: now) : UsageAggregation.days(ledger, period: period, at: now)) : []
+        chart.toolTip = chart.hourly ? "今天按0–23时展示；悬停查看每小时数据" : "悬停查看每日数据，或打开每日明细"
         heatmap.timeMode = chart.timeMode; heatmap.days = store.historyAvailable ? UsageAggregation.days(ledger, period: .sixMonths, at: now) : []
         let tab = tabs.selectedSegment
+        details.title = tab == 1 && chart.hourly ? "小时明细" : "每日明细"
+        details.toolTip = details.title; details.refreshAppearance()
         overview.isHidden = tab != 0; chart.isHidden = tab != 1; heatmap.isHidden = tab != 2
         ranges.isHidden = tab != 1; styles.isHidden = tab != 1; metrics.isHidden = tab == 0; periodLabel.isHidden = tab == 0
         periodLabel.stringValue = tab == 2 ? "近半年 · \(chart.timeMode ? "工作时间" : "完成次数")" : "工作 \(summary.workCount)次 · \(StatsFormat.duration(summary.workSeconds))"
@@ -393,15 +402,16 @@ private final class StatisticsDashboard: NSView {
     @objc private func showInfo() {
         guard let window else { return }
         let alert = NSAlert(); alert.messageText = "统计说明"
-        alert.informativeText = store.persistenceError ?? "工作次数按完成计算，休息次数按实际开始计算。暂停和场景预览不计入时长，倍速按实际经过的时间记录。\n\n时间柱每根代表24小时，其他时间包含未记录与当天尚未到达的时段。多个番茄钟的重叠时长去重，工作优先。\n\n统计从此功能启用后开始记录，无法补回此前历史。数据仅保存在当前 Mac。"
+        alert.informativeText = store.persistenceError ?? "工作次数按完成计算，休息次数按实际开始计算。暂停和场景预览不计入时长，倍速按实际经过的时间记录。\n\n今天的时间柱每根代表1小时，其他周期每根代表24小时，其他时间包含未记录与当天尚未到达的时段。多个番茄钟的重叠时长去重，工作优先。\n\n统计从此功能启用后开始记录，无法补回此前历史。数据仅保存在当前 Mac。"
         alert.addButton(withTitle: "知道了"); alert.beginSheetModal(for: window)
     }
     @objc private func showDetails() {
         guard let window else { return }
         let controller = StatisticsDetails()
+        controller.hourly = tabs.selectedSegment == 1 && chart.hourly
         controller.days = tabs.selectedSegment != 1 ? heatmap.days.reversed() : chart.days.reversed()
         let sheet = NSWindow(contentViewController: controller)
-        sheet.title = tabs.selectedSegment == 1 ? "\(ranges.titleOfSelectedItem ?? "") · 每日明细" : "近半年 · 每日明细"; detailsController = controller
+        sheet.title = tabs.selectedSegment == 1 ? "\(ranges.titleOfSelectedItem ?? "") · \(controller.hourly ? "小时明细" : "每日明细")" : "近半年 · 每日明细"; detailsController = controller
         window.beginSheet(sheet) { [weak self] _ in self?.detailsController = nil }
     }
 }

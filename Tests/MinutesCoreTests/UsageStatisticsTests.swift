@@ -185,3 +185,68 @@ final class UsageStatisticsTests: XCTestCase {
     }
 
 }
+
+final class HourlyUsageStatisticsTests: XCTestCase {
+    private func calendar(_ zone: String = "Asia/Shanghai") -> Calendar {
+        var value = Calendar(identifier: .gregorian); value.timeZone = TimeZone(identifier: zone)!; return value
+    }
+    private func date(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: Int = 0, calendar: Calendar) -> Date {
+        calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute))!
+    }
+    func testHourlySplittingCountsAndOverlapPriority() {
+        let cal = calendar(), start = date(2026, 10, 15, 9, 45, calendar: cal)
+        let ten = date(2026, 10, 15, 10, calendar: cal), finish = ten.addingTimeInterval(300)
+        let ledger = UsageLedger(records: [
+            UsageRecord(kind: .work, startedAt: start, finishedAt: finish, completed: true, intervals: [UsageInterval(start: start, end: finish)]),
+            UsageRecord(kind: .work, startedAt: ten, finishedAt: ten.addingTimeInterval(600), completed: true, intervals: [UsageInterval(start: ten, end: ten.addingTimeInterval(600))]),
+            UsageRecord(kind: .rest, startedAt: finish, intervals: [UsageInterval(start: finish, end: ten.addingTimeInterval(900))])
+        ])
+        let now = ten.addingTimeInterval(3600)
+        let hours = UsageAggregation.hours(ledger, at: now, calendar: cal)
+        XCTAssertEqual(hours.count, 24)
+        XCTAssertEqual(hours.compactMap(\.hour), Array(0..<24))
+        XCTAssertEqual(hours[9].summary.workSeconds, 900)
+        XCTAssertEqual(hours[10].summary.workSeconds, 600)
+        XCTAssertEqual(hours[10].summary.restSeconds, 300)
+        XCTAssertEqual(hours[9].summary.workCount, 0)
+        XCTAssertEqual(hours[10].summary.workCount, 2)
+        XCTAssertEqual(hours[10].summary.restCount, 1)
+        let daily = UsageAggregation.days(ledger, period: .today, at: now, calendar: cal)[0]
+        XCTAssertEqual(hours.reduce(0) { $0 + $1.summary.workSeconds }, daily.summary.workSeconds)
+        XCTAssertEqual(hours.reduce(0) { $0 + $1.summary.restSeconds }, daily.summary.restSeconds)
+    }
+    func testFutureHoursStayEmptyAndCurrentHourIsClipped() {
+        let cal = calendar(), start = date(2026, 10, 15, 10, calendar: cal), end = start.addingTimeInterval(3600)
+        let ledger = UsageLedger(records: [UsageRecord(kind: .work, startedAt: start, finishedAt: end, completed: true, intervals: [UsageInterval(start: start, end: end)])])
+        let hours = UsageAggregation.hours(ledger, at: start.addingTimeInterval(1800), calendar: cal)
+        XCTAssertEqual(hours[10].summary.workSeconds, 1800, accuracy: 0.01)
+        XCTAssertEqual(hours[10].summary.workCount, 0)
+        XCTAssertEqual(hours[11].summary.workSeconds, 0)
+        XCTAssertEqual(hours[23].otherSeconds, 3600)
+    }
+    func testMidnightIsAssignedToTodayAndNextMidnightIsExcluded() {
+        let cal = calendar(), start = date(2026, 10, 15, 0, calendar: cal), end = start.addingTimeInterval(86400)
+        let ledger = UsageLedger(records: [
+            UsageRecord(kind: .work, startedAt: start.addingTimeInterval(-900), finishedAt: start.addingTimeInterval(900), completed: true, intervals: [UsageInterval(start: start.addingTimeInterval(-900), end: start.addingTimeInterval(900))]),
+            UsageRecord(kind: .work, startedAt: end.addingTimeInterval(-900), finishedAt: end, completed: true, intervals: [UsageInterval(start: end.addingTimeInterval(-900), end: end)])
+        ])
+        let hours = UsageAggregation.hours(ledger, at: end.addingTimeInterval(-0.001), calendar: cal)
+        XCTAssertEqual(hours[0].summary.workSeconds, 900)
+        XCTAssertEqual(hours[0].summary.workCount, 1)
+        XCTAssertEqual(hours[23].summary.workCount, 0)
+    }
+    func testDSTStillHas24CivilBucketsWithAccurateElapsedTime() {
+        let cal = calendar("America/New_York")
+        for (month, day, total) in [(3, 8, 82800.0), (11, 1, 90000.0)] {
+            let start = date(2026, month, day, 0, calendar: cal)
+            let end = cal.date(byAdding: .day, value: 1, to: start)!
+            let ledger = UsageLedger(records: [UsageRecord(kind: .work, startedAt: start, intervals: [UsageInterval(start: start, end: end)])])
+            let hours = UsageAggregation.hours(ledger, at: end.addingTimeInterval(-0.001), calendar: cal)
+            XCTAssertEqual(hours.count, 24)
+            XCTAssertEqual(hours.reduce(0) { $0 + $1.daySeconds }, total)
+            XCTAssertEqual(hours.reduce(0) { $0 + $1.summary.workSeconds }, total, accuracy: 0.01)
+            if month == 3 { XCTAssertEqual(hours[2].daySeconds, 0) }
+            else { XCTAssertEqual(hours[1].daySeconds, 7200) }
+        }
+    }
+}

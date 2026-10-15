@@ -67,6 +67,11 @@ public struct UsageDay {
     public let date: Date
     public let daySeconds: TimeInterval
     public let summary: UsageSummary
+    /// Civil hour for the 24 buckets in today's chart; nil for daily buckets.
+    public let hour: Int?
+    public init(date: Date, daySeconds: TimeInterval, summary: UsageSummary, hour: Int? = nil) {
+        self.date = date; self.daySeconds = daySeconds; self.summary = summary; self.hour = hour
+    }
     public var otherSeconds: TimeInterval { max(0, daySeconds - summary.workSeconds - summary.restSeconds) }
 }
 
@@ -144,6 +149,39 @@ public enum UsageAggregation {
             summary.workSeconds = workTimes[date] ?? 0
             summary.restSeconds = max(0, (occupiedTimes[date] ?? 0) - summary.workSeconds)
             return UsageDay(date: date, daySeconds: next.timeIntervalSince(date), summary: summary)
+        }
+    }
+    /// Always returns civil hours 0...23. Repeated DST hours share a bucket;
+    /// a skipped hour is empty. Time totals still use actual elapsed seconds.
+    public static func hours(_ ledger: UsageLedger, at now: Date, calendar: Calendar = .current) -> [UsageDay] {
+        let start = calendar.startOfDay(for: now)
+        let end = calendar.date(byAdding: .day, value: 1, to: start)!
+        let cutoff = min(end, now.addingTimeInterval(0.001))
+        let records = ledger.records.filter { record in
+            record.intervals.contains { $0.start < end && $0.end > start }
+                || (record.kind == .rest && record.startedAt >= start && record.startedAt < end)
+                || (record.completed && record.finishedAt.map { $0 >= start && $0 < end } == true)
+        }
+        let today = UsageLedger(recordingSince: ledger.recordingSince, records: records)
+        var summaries = Array(repeating: UsageSummary(), count: 24)
+        var durations = Array(repeating: TimeInterval(0), count: 24)
+        var dates: [Date?] = Array(repeating: nil, count: 24)
+        var cursor = start
+        while cursor < end {
+            let hour = calendar.component(.hour, from: cursor)
+            let boundary = calendar.dateInterval(of: .hour, for: cursor)?.end ?? cursor.addingTimeInterval(3600)
+            let next = min(end, boundary > cursor ? boundary : cursor.addingTimeInterval(3600))
+            dates[hour] = dates[hour] ?? cursor
+            durations[hour] += next.timeIntervalSince(cursor)
+            if cursor < cutoff {
+                let value = summary(today, from: cursor, to: min(next, cutoff))
+                summaries[hour].workSeconds += value.workSeconds; summaries[hour].restSeconds += value.restSeconds
+                summaries[hour].workCount += value.workCount; summaries[hour].restCount += value.restCount
+            }
+            cursor = next
+        }
+        return (0..<24).map { hour in
+            UsageDay(date: dates[hour] ?? start, daySeconds: durations[hour], summary: summaries[hour], hour: hour)
         }
     }
     public static func total(_ ledger: UsageLedger, at now: Date) -> UsageSummary {
