@@ -1299,6 +1299,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         menu.addItem(menuItem("到时音乐…", #selector(showSounds)))
         if includeQuit {
             menu.addItem(.separator())
+            menu.addItem(menuItem("使用数据…", #selector(showStatistics)))
+            menu.addItem(.separator())
             menu.addItem(menuItem("退出 Minutes2", #selector(quit), key: "q"))
         }
         return menu
