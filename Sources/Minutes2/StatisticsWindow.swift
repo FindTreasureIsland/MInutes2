@@ -206,25 +206,27 @@ private final class StatisticsOverview: NSView {
                             NSColor(srgbRed: 0.03, green: 0.37, blue: 0.53, alpha: 1)])!.draw(in: path, angle: -35)
         let arc = NSBezierPath(ovalIn: circle.insetBy(dx: 4, dy: 4)); arc.lineWidth = 2.5
         NSColor.white.withAlphaComponent(0.65).setStroke(); arc.stroke()
-        StatsFormat.draw("累计完成", in: NSRect(x: 18, y: circle.minY + 18, width: 112, height: 20), size: 11, color: .white, alignment: .center)
+        StatsFormat.draw("今日完成", in: NSRect(x: 18, y: circle.minY + 18, width: 112, height: 20), size: 11, color: .white, alignment: .center)
         let countRect = NSRect(x: 18, y: circle.minY + 37, width: 112, height: 45)
         if available {
-            CountdownDigits.draw(total.workCount, in: countRect, height: min(34, 96 * 94 / (CGFloat(String(total.workCount).count) * 79)))
+            CountdownDigits.draw(today.workCount, in: countRect, height: min(34, 96 * 94 / (CGFloat(String(today.workCount).count) * 79)))
         } else { StatsFormat.draw("—", in: countRect, size: 32, color: .white, alignment: .center) }
         StatsFormat.draw("次专注", in: NSRect(x: 18, y: circle.minY + 84, width: 112, height: 20), size: 11, color: .white, alignment: .center)
         let x: CGFloat = 150, middle = bounds.height / 2
-        StatsFormat.draw("累计工作时间", in: NSRect(x: x, y: middle - 44, width: workWidth - x - 16, height: 22), size: 12)
-        StatsFormat.draw(available ? StatsFormat.duration(total.workSeconds) : "—", in: NSRect(x: x, y: middle - 14, width: workWidth - x - 16, height: 32), size: 22, color: StatsStyle.work, weight: .medium)
-        StatsFormat.draw(available ? "今天 \(today.workCount)次 · \(StatsFormat.duration(today.workSeconds))" : "统计记录暂不可用", in: NSRect(x: x, y: middle + 29, width: workWidth - x - 16, height: 20), size: 11)
+        StatsFormat.draw("今日工作时间", in: NSRect(x: x, y: middle - 44, width: workWidth - x - 16, height: 22), size: 12)
+        StatsFormat.draw(available ? StatsFormat.duration(today.workSeconds) : "—", in: NSRect(x: x, y: middle - 14, width: workWidth - x - 16, height: 32), size: 22, color: StatsStyle.work, weight: .medium)
+        StatsFormat.draw(available ? "累计 \(total.workCount)次 · \(StatsFormat.duration(total.workSeconds))" : "统计记录暂不可用", in: NSRect(x: x, y: middle + 29, width: workWidth - x - 16, height: 20), size: 11)
         let restX = workWidth + 12, restWidth = width - restX
-        for (index, pair) in [("累计休息次数", "\(total.restCount) 次"), ("累计休息时间", StatsFormat.duration(total.restSeconds))].enumerated() {
+        for (index, pair) in [("今日休息次数", "\(today.restCount) 次"), ("今日休息时间", StatsFormat.duration(today.restSeconds))].enumerated() {
             let top = CGFloat(index) * bounds.height / 2 + 15
             let symbol = NSImage(systemSymbolName: index == 0 ? "cup.and.saucer" : "leaf", accessibilityDescription: pair.0)
             symbol?.withSymbolConfiguration(.init(paletteColors: [StatsStyle.rest]))?.draw(in: NSRect(x: restX + 16, y: top, width: 18, height: 18))
             StatsFormat.draw(pair.0, in: NSRect(x: restX + 42, y: top + 1, width: restWidth - 54, height: 20), size: 12)
             StatsFormat.draw(available ? pair.1 : "—", in: NSRect(x: restX + 16, y: top + 28, width: restWidth - 32, height: 30), size: 21, color: StatsStyle.rest, weight: .medium)
+            let cumulative = index == 0 ? "累计 \(total.restCount) 次" : "累计 \(StatsFormat.duration(total.restSeconds))"
+            StatsFormat.draw(available ? cumulative : "", in: NSRect(x: restX + 16, y: top + 59, width: restWidth - 32, height: 19), size: 11)
         }
-        setAccessibilityLabel(available ? "累计完成\(total.workCount)次，工作\(StatsFormat.duration(total.workSeconds))，休息\(total.restCount)次，\(StatsFormat.duration(total.restSeconds))。今天完成\(today.workCount)次。" : "统计记录暂不可读取")
+        setAccessibilityLabel(available ? "今天完成\(today.workCount)次，工作\(StatsFormat.duration(today.workSeconds))，休息\(today.restCount)次，\(StatsFormat.duration(today.restSeconds))。累计完成\(total.workCount)次，工作\(StatsFormat.duration(total.workSeconds))，休息\(total.restCount)次，\(StatsFormat.duration(total.restSeconds))。" : "统计记录暂不可读取")
     }
 }
 
