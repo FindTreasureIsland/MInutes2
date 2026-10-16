@@ -3,6 +3,7 @@ import AVFoundation
 import UniformTypeIdentifiers
 import QuartzCore
 import ImageIO
+import ServiceManagement
 #if canImport(MinutesCore)
 import MinutesCore
 #endif
@@ -1423,6 +1424,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         menu.addItem(.separator())
         menu.addItem(menuItem("重置计时", #selector(resetTimer), key: "r"))
         menu.addItem(menuItem("到时音乐…", #selector(showSounds)))
+        menu.addItem(.separator())
+        let loginItem = menuItem("开机启动", #selector(toggleLaunchAtLogin))
+        updateLaunchAtLoginItem(loginItem)
+        menu.addItem(loginItem)
         if includeQuit {
             menu.addItem(.separator())
             menu.addItem(menuItem("使用数据…", #selector(showStatistics)))
@@ -1483,6 +1488,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
+        case #selector(toggleLaunchAtLogin):
+            updateLaunchAtLoginItem(item)
+            return true
         case #selector(stopReminder): return isPresentingAlarm
         case #selector(newTimer): return !isPresentingAlarm
         case #selector(closeTimer): return active != nil || NSApp.keyWindow?.windowController is StatisticsWindowController || NSApp.keyWindow?.windowController is AboutWindowController
@@ -1514,6 +1522,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             $0.state = $0.tag == active?.engine.speedMultiplier ? .on : .off
         }
         updateStatus()
+    }
+    private func updateLaunchAtLoginItem(_ item: NSMenuItem) {
+        // Read the system status so changes in Login Items are reflected here.
+        switch SMAppService.mainApp.status {
+        case .enabled:
+            item.state = .on
+            item.toolTip = "登录 Mac 后自动打开 Minutes2"
+        case .requiresApproval:
+            item.state = .mixed
+            item.toolTip = "等待系统批准；再次单击可取消开机启动"
+        default:
+            item.state = .off
+            item.toolTip = "登录 Mac 后自动打开 Minutes2"
+        }
+    }
+    @objc private func toggleLaunchAtLogin() {
+        let service = SMAppService.mainApp
+        do {
+            switch service.status {
+            case .enabled, .requiresApproval:
+                try service.unregister()
+            default:
+                try service.register()
+                if service.status == .requiresApproval {
+                    let alert = NSAlert()
+                    alert.messageText = "请允许 Minutes2 开机启动"
+                    alert.informativeText = "在系统设置的“登录项”中允许 Minutes2，即可在登录 Mac 后自动打开。"
+                    alert.addButton(withTitle: "打开登录项设置")
+                    alert.addButton(withTitle: "稍后")
+                    if alert.runModal() == .alertFirstButtonReturn {
+                        SMAppService.openSystemSettingsLoginItems()
+                    }
+                }
+            }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "无法更改开机启动设置"
+            alert.informativeText = "请从固定位置运行 Minutes2.app 后重试。\n\n\(error.localizedDescription)"
+            alert.addButton(withTitle: "知道了")
+            alert.runModal()
+        }
+        refresh()
     }
     @objc private func changeSpeed(_ sender: NSMenuItem) {
         guard validateMenuItem(sender) else { return }

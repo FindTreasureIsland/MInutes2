@@ -63,8 +63,9 @@ final class AboutWindowController: NSWindowController {
         label("开发人员", frame: NSRect(x: 282, y: 258, width: 124, height: 30), size: 21, color: .white, alignment: .right)
         label("Whiplasher", frame: NSRect(x: 425, y: 258, width: 270, height: 30), size: 21, color: .black)
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
-        label("Minutes2 · 版本 \(version)", frame: NSRect(x: 30, y: 322, width: 660, height: 28),
-              size: 13, color: .white, alignment: .center)
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+        label("版本 \(version)（构建 \(build)）", frame: NSRect(x: 48, y: 296, width: 240, height: 32),
+              size: 18, color: .white, alignment: .center)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     func present() {
