@@ -113,7 +113,7 @@ public struct MikuLandingPlacement {
         let room = showsCountdown ? height - margin - clockTop - gap : height - 2 * margin
         let bodyWidth = max(0.01, visibleRect.width), bodyHeight = max(0.01, visibleRect.height)
         let side = max(1, min(440, width * 0.34, height * 0.43,
-                              (width - 2 * margin) / bodyWidth, max(1, room) / bodyHeight))
+                              (width - 2 * margin) / bodyWidth, max(1, room) / bodyHeight)) * 0.5
         size = CGSize(width: side, height: side)
         let x = width / 2 - visibleRect.midX * side
         let y = showsCountdown ? clockTop + gap - visibleRect.minY * side
