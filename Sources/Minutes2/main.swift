@@ -332,8 +332,10 @@ final class DialView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? {
         // Deliver the activation click to the dial, rather than its glass subview.
-        super.hitTest(point) == nil ? nil : self
+        let local = convert(point, from: superview)
+        return containsDialPoint(local) && super.hitTest(point) != nil ? self : nil
     }
+    var isPointerInteractionActive: Bool { press.isActive || settingDrag || windowDrag }
     private let circle = NSRect(x: 70, y: 70, width: 300, height: 300)
     private let center = NSPoint(x: 220, y: 220)
 
@@ -403,10 +405,11 @@ final class DialView: NSView {
     }
     func containsDialPoint(_ p: NSPoint) -> Bool {
         if hypot(p.x - center.x, p.y - center.y) <= 150 { return true }
-        guard let owner, owner.engine.phase == .setting || owner.engine.phase == .paused else { return false }
+        guard !isChoosingMusic, let owner,
+              owner.engine.phase == .setting || owner.engine.phase == .paused else { return false }
         let angle = owner.engine.remaining(at: Date()) / 3600 * 2 * .pi
         let handle = NSPoint(x: center.x + 150 * sin(angle), y: center.y - 150 * cos(angle))
-        return hypot(p.x - handle.x, p.y - handle.y) <= 36
+        return hypot(p.x - handle.x, p.y - handle.y) <= 28
     }
     override func draw(_ dirtyRect: NSRect) {
         NSGraphicsContext.current?.cgContext.clear(bounds)
@@ -427,6 +430,7 @@ final class DialView: NSView {
         NSGraphicsContext.restoreGraphicsState()
     }
     func refresh() {
+        owner?.updatePointerPassthrough()
         updateAppearance()
         if isChoosingMusic {
             setAccessibilityValue("到时音乐：\(AudioController.soundTitles[musicIndex])，左右键切换，Enter 确认，Esc 取消")
@@ -531,11 +535,7 @@ final class DialView: NSView {
     override func mouseDown(with event: NSEvent) {
         guard let owner else { return }
         let p = convert(event.locationInWindow, from: nil)
-        if !containsDialPoint(p) {
-            clearFocus()
-            window?.performDrag(with: event)
-            return
-        }
+        guard containsDialPoint(p) else { return }
         if isChoosingMusic {
             if p.x < center.x - 88 { moveMusic(-1) }
             else if p.x > center.x + 88 { moveMusic(1) }
@@ -1112,7 +1112,7 @@ final class TimerSession: NSObject, NSWindowDelegate, NSPopoverDelegate {
         let savedOpacity = UserDefaults.standard.object(forKey: "opacityPercent") as? Int ?? 100
         opacityPercent = Self.opacityOptions.contains(savedOpacity) ? savedOpacity : 100
         window.alphaValue = CGFloat(opacityPercent) / 100
-        window.ignoresMouseEvents = opacityPercent == 0
+        window.ignoresMouseEvents = true
         window.title = "Minutes2 \(number)"
         window.isOpaque = false; window.backgroundColor = .clear; window.hasShadow = false
         window.isReleasedWhenClosed = false
@@ -1149,10 +1149,19 @@ final class TimerSession: NSObject, NSWindowDelegate, NSPopoverDelegate {
         soundPopover.close()
         opacityPercent = percent
         window.alphaValue = CGFloat(percent) / 100
-        // A fully invisible clock must not intercept clicks on the desktop.
-        window.ignoresMouseEvents = percent == 0
+        updatePointerPassthrough()
         UserDefaults.standard.set(percent, forKey: "opacityPercent")
         app?.sessionChanged(self)
+    }
+    // A transparent NSView hit test alone cannot route an event to another app.
+    // Tell WindowServer to bypass the whole window whenever the pointer is outside
+    // the visible dial/handle, but keep capture until an active drag finishes.
+    func updatePointerPassthrough(at screenPoint: NSPoint = NSEvent.mouseLocation) {
+        let point = dial.convert(window.convertPoint(fromScreen: screenPoint), from: nil)
+        let acceptsPointer = opacityPercent > 0 &&
+            (dial.isPointerInteractionActive || dial.containsDialPoint(point))
+        let ignores = !acceptsPointer
+        if window.ignoresMouseEvents != ignores { window.ignoresMouseEvents = ignores }
     }
     func setSize(_ percent: Int) {
         guard Self.sizeOptions.contains(percent), !closed else { return }
@@ -1228,6 +1237,7 @@ final class TimerSession: NSObject, NSWindowDelegate, NSPopoverDelegate {
     func showWindow() {
         guard !closed, app?.isPresentingAlarm == false, app?.isScreenLocked == false else { return }
         NSApp.activate(ignoringOtherApps: true)
+        updatePointerPassthrough()
         window.makeKeyAndOrderFront(nil); window.makeFirstResponder(dial)
         app?.activateSession(self)
     }
@@ -1295,6 +1305,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         .flatMap(ReminderScene.init(rawValue:)) ?? .bubbles
     private var showsRestCountdown = UserDefaults.standard.object(forKey: "showsRestCountdown") as? Bool ?? true
     private var clickMonitor: Any?
+    private var localPointerMonitor: Any?
+    private var globalPointerMonitor: Any?
+    private func updatePointerPassthrough() {
+        let point = NSEvent.mouseLocation
+        for session in sessions where !session.closed && session.window.isVisible {
+            session.updatePointerPassthrough(at: point)
+        }
+    }
     private var active: TimerSession? {
         sessions.first(where: { $0.window === NSApp.keyWindow }) ?? lastActive ?? sessions.last
     }
@@ -1317,6 +1335,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 }
             }
             return event
+        }
+        // Mouse-only global monitoring does not require accessibility permission.
+        let pointerEvents: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged]
+        localPointerMonitor = NSEvent.addLocalMonitorForEvents(matching: pointerEvents) { [weak self] event in
+            self?.updatePointerPassthrough()
+            return event
+        }
+        globalPointerMonitor = NSEvent.addGlobalMonitorForEvents(matching: pointerEvents.union([.leftMouseDown, .rightMouseDown, .otherMouseDown])) { [weak self] event in
+            if event.type == .leftMouseDown || event.type == .rightMouseDown || event.type == .otherMouseDown {
+                self?.sessions.forEach { $0.dial.clearFocus() }
+            }
+            self?.updatePointerPassthrough()
         }
         if CommandLine.arguments.contains("--demo-alarm") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.previewAlarm() }
@@ -1655,6 +1685,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         usage.finishAll(at: now)
         terminating = true; ticker?.invalidate()
         if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
+        if let localPointerMonitor { NSEvent.removeMonitor(localPointerMonitor) }
+        if let globalPointerMonitor { NSEvent.removeMonitor(globalPointerMonitor) }
         sessions.forEach { $0.window.saveFrame(usingName: $0.frameName); $0.soundPopover.close(); $0.audio.stop() }
         active?.savePosition()
         alarm.dismiss(); endActivity(); NSWorkspace.shared.notificationCenter.removeObserver(self)
