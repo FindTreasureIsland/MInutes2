@@ -307,7 +307,7 @@ private final class StatisticsDashboard: NSView {
             control.selectedSegment = 0; control.segmentStyle = .rounded; control.font = .systemFont(ofSize: 13)
             control.target = self; control.action = #selector(selectionChanged)
         }
-        ranges.addItems(withTitles: UsagePeriod.allCases.map(\.title)); ranges.selectItem(at: UsagePeriod.week.rawValue)
+        ranges.addItems(withTitles: UsagePeriod.allCases.map(\.title)); ranges.selectItem(at: UsagePeriod.today.rawValue)
         ranges.target = self; ranges.action = #selector(selectionChanged)
         tabs.setAccessibilityLabel("统计页面"); ranges.setAccessibilityLabel("统计周期")
         metrics.setAccessibilityLabel("统计指标"); styles.setAccessibilityLabel("图表类型")
@@ -376,7 +376,7 @@ private final class StatisticsDashboard: NSView {
     }
     func refresh(at now: Date = Date()) {
         let ledger = store.snapshot(at: now), total = UsageAggregation.total(ledger, at: now)
-        let period = UsagePeriod(rawValue: ranges.indexOfSelectedItem) ?? .week
+        let period = UsagePeriod(rawValue: ranges.indexOfSelectedItem) ?? .today
         let summary = UsageAggregation.summary(ledger, from: period.start(at: now, calendar: .current), to: now.addingTimeInterval(0.001))
         overview.total = total; overview.available = store.historyAvailable
         overview.today = UsageAggregation.summary(ledger, from: Calendar.current.startOfDay(for: now), to: now.addingTimeInterval(0.001))
