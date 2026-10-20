@@ -61,6 +61,7 @@ public struct UsageSummary {
     public var restCount = 0
     public var workSeconds: TimeInterval = 0
     public var restSeconds: TimeInterval = 0
+    public init() {}
 }
 
 public struct UsageDay {

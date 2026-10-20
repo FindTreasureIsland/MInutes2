@@ -1425,6 +1425,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         menu.addItem(menuItem("重置计时", #selector(resetTimer), key: "r"))
         menu.addItem(menuItem("到时音乐…", #selector(showSounds)))
         menu.addItem(.separator())
+        let top = menuItem("番茄钟置顶", #selector(toggleTop))
+        top.state = stayOnTop ? .on : .off
+        menu.addItem(top)
+        menu.addItem(menuItem("隐藏番茄钟", #selector(hideTimer)))
+        menu.addItem(.separator())
         let loginItem = menuItem("开机启动", #selector(toggleLaunchAtLogin))
         updateLaunchAtLoginItem(loginItem)
         menu.addItem(loginItem)
@@ -1488,6 +1493,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
+        case #selector(toggleTop):
+            item.state = stayOnTop ? .on : .off
+            return true
+        case #selector(hideTimer): return active != nil && !isPresentingAlarm
         case #selector(toggleLaunchAtLogin):
             updateLaunchAtLoginItem(item)
             return true
@@ -1602,6 +1611,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
     @objc private func showSounds() { active?.showSounds() }
     @objc private func showWindow() { if sessions.isEmpty { newTimer() } else { active?.showWindow() } }
+    @objc private func hideTimer() {
+        guard let session = active, !isPresentingAlarm else { return }
+        session.savePosition()
+        session.soundPopover.close(); session.dial.clearFocus()
+        session.window.orderOut(nil)
+        refresh()
+    }
     @objc private func centerWindow() { active?.window.center(); active?.showWindow() }
     @objc private func toggleTop() {
         stayOnTop.toggle(); UserDefaults.standard.set(stayOnTop, forKey: "stayOnTop")
