@@ -43,7 +43,15 @@ private enum StatsFormat {
 }
 
 private final class StatisticsChart: NSView {
-    var days: [UsageDay] = [] { didSet { selected = nil; needsDisplay = true } }
+    var days: [UsageDay] = [] {
+        didSet {
+            if let index = selected,
+               !days.indices.contains(index) || days[index].date != oldValue[index].date || days[index].hour != oldValue[index].hour {
+                selected = nil
+            }
+            needsDisplay = true
+        }
+    }
     var timeMode = true { didSet { needsDisplay = true } }
     var bars = true { didSet { needsDisplay = true } }
     var hourly = false { didSet { needsDisplay = true } }
@@ -144,7 +152,12 @@ private final class StatisticsChart: NSView {
 }
 
 private final class StatisticsHeatmap: NSView {
-    var days: [UsageDay] = [] { didSet { needsDisplay = true } }
+    var days: [UsageDay] = [] {
+        didSet {
+            if let date = hovered?.date { hovered = days.first { $0.date == date } }
+            needsDisplay = true
+        }
+    }
     var timeMode = true { didSet { needsDisplay = true } }
     private var cells: [(NSRect, UsageDay)] = []
     private var hovered: UsageDay?
@@ -442,7 +455,13 @@ final class StatisticsWindowController: NSWindowController, NSWindowDelegate {
         dashboard.refresh(); NSApp.activate(ignoringOtherApps: true)
         showWindow(nil); window?.makeKeyAndOrderFront(nil)
         if refreshTimer == nil {
-            refreshTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.dashboard.refresh() }
+            let timer = Timer(timeInterval: 1, repeats: true) { [weak self] timer in
+                guard let self else { timer.invalidate(); return }
+                guard self.window?.isVisible == true else { return }
+                self.dashboard.refresh()
+            }
+            refreshTimer = timer
+            RunLoop.main.add(timer, forMode: .common)
         }
     }
     func windowWillClose(_ notification: Notification) { refreshTimer?.invalidate(); refreshTimer = nil }
